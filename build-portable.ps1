@@ -80,7 +80,17 @@ function Write-Step([string]$Message) {
 }
 
 function Invoke-Command-Required([string]$Executable, [string[]]$Arguments, [string]$WorkDir = $PWD) {
-    $result = & $Executable @Arguments 2>&1
+    # Some native tools (rustup, cargo) write informational messages to stderr.
+    # Under $ErrorActionPreference='Stop', merging 2>&1 turns those into
+    # terminating NativeCommandError exceptions even when exit code is 0.
+    # Temporarily relax error handling around the invocation.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $result = & $Executable @Arguments 2>&1
+    } finally {
+        $ErrorActionPreference = $prev
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host $result -ForegroundColor Yellow
         throw "Command failed (exit $LASTEXITCODE): $Executable $Arguments"
@@ -342,5 +352,8 @@ Compress-Archive -Path "$AppDir\*" -DestinationPath $ZipPath -CompressionLevel O
 
 $zipSize = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
 Write-Host "`nPortable package created: $ZipPath ($zipSize MB)" -ForegroundColor Green
-Write-Host "Contents of application directory:" -ForegroundColor Cyan
-Get-ChildItem $AppDir | Select-Object Name, @{N="Size(KB)";E={[math]::Round($_.Length/1KB,0)}} | Format-Table -AutoSize
+$topItems = Get-ChildItem $AppDir |
+    Select-Object Name, @{N="Size(KB)";E={[math]::Round($_.Length/1KB,0)}} |
+    Format-Table -AutoSize | Out-String
+Write-Host "Top-level contents of application directory:" -ForegroundColor Cyan
+Write-Host $topItems
