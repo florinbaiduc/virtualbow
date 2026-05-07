@@ -84,18 +84,22 @@ function Invoke-Command-Required([string]$Executable, [string[]]$Arguments, [str
     # Under $ErrorActionPreference='Stop', merging 2>&1 turns those into
     # terminating NativeCommandError exceptions even when exit code is 0.
     # Temporarily relax error handling around the invocation.
+    #
+    # Output is streamed line-by-line via Write-Host so long-running commands
+    # (cargo build, cmake, ninja) show progress live instead of staring at a
+    # frozen console for minutes.
+    Write-Host "  > $Executable $($Arguments -join ' ')" -ForegroundColor DarkGray
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $result = & $Executable @Arguments 2>&1
+        & $Executable @Arguments 2>&1 | ForEach-Object { Write-Host $_ }
+        $exit = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prev
     }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host $result -ForegroundColor Yellow
-        throw "Command failed (exit $LASTEXITCODE): $Executable $Arguments"
+    if ($exit -ne 0) {
+        throw "Command failed (exit $exit): $Executable $($Arguments -join ' ')"
     }
-    $result
 }
 
 # Discovers all DLLs needed by the app binaries (recursively via ldd) that
@@ -259,13 +263,34 @@ if (-not (Test-Path $windeployqt)) {
 }
 
 try {
-    $windeployqtOutput = & $windeployqt $GuiExe 2>&1
+    # windeployqt6 prints its first warning ('Cannot open .../catalogs.json') to
+    # stderr BEFORE copying any plugin DLLs. Under $ErrorActionPreference='Stop',
+    # the 2>&1 merge would raise a terminating error on that very first line and
+    # the surrounding catch would silently swallow a half-complete deploy,
+    # leaving the portable build without platforms\qwindows.dll and friends.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $windeployqtOutput = & $windeployqt $GuiExe 2>&1
+        $deployExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
     $windeployqtOutput | ForEach-Object { Write-Host $_ }
+    if ($deployExit -ne 0) {
+        # windeployqt6 from MSYS2 commonly exits 1 because of a missing
+        # catalogs.json for translations. That's a known harmless quirk: all
+        # plugin DLLs are still copied. Only warn — don't abort.
+        Write-Host "  windeployqt6 exited with code $deployExit (treated as non-fatal)" -ForegroundColor Yellow
+    }
 } catch {
-    # windeployqt6 from MSYS2 exits 1 due to missing translations catalog
-    # (dev-build quirk with no catalogs.json). This is harmless - all plugins
-    # are still copied correctly.
-    Write-Host "  (windeployqt6 non-fatal warning suppressed)" -ForegroundColor Yellow
+    Write-Host "  (windeployqt6 non-fatal warning suppressed: $_)" -ForegroundColor Yellow
+}
+
+# Sanity-check the deployment: the Windows platform plugin is mandatory.
+$qwindows = Join-Path $AppDir "platforms\qwindows.dll"
+if (-not (Test-Path $qwindows)) {
+    throw "windeployqt6 did not deploy platforms\qwindows.dll. Without it the GUI cannot start. Check earlier output."
 }
 Write-Host "windeployqt6 completed." -ForegroundColor Green
 
