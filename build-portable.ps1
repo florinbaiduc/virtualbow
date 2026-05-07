@@ -386,6 +386,52 @@ New-Item -ItemType Directory -Path $StageLib -Force | Out-Null
 
 Copy-Item -Path (Join-Path $AppDir '*') -Destination $StageLib -Recurse -Force
 
+# Documentation & examples bundled at the top level so users can find them
+# without digging into lib/. The user-manual stays inside lib/ as well, since
+# the GUI's Help menu opens it via a path relative to the executable.
+$DocsSrc      = Join-Path $ScriptDir "docs"
+$ExamplesSrc  = Join-Path $DocsSrc   "examples"
+$ExamplesDst  = Join-Path $StageApp  "examples"
+if (Test-Path $ExamplesSrc) {
+    New-Item -ItemType Directory -Path $ExamplesDst -Force | Out-Null
+    # Skip VCS metadata and editor backup files; ship only the curated content.
+    Copy-Item -Path (Join-Path $ExamplesSrc '*') -Destination $ExamplesDst -Recurse -Force `
+        -Exclude '.gitignore','*.bak'
+    # Copy-Item -Exclude only filters the top level; prune any leftovers deeper in.
+    Get-ChildItem $ExamplesDst -Recurse -Force -Include '.gitignore','*.bak' |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Write-Host "  Bundled examples/ ($((Get-ChildItem $ExamplesDst -Recurse -File).Count) files)" -ForegroundColor Gray
+} else {
+    Write-Host "  Warning: $ExamplesSrc not found; examples not bundled" -ForegroundColor Yellow
+}
+
+# Top-level shortcut to the user manual that already lives inside lib/.
+# Use a tiny .cmd launcher (relative path, %~dp0) instead of duplicating
+# ~30 MB of HTML or shipping a .lnk (which would bake in an absolute path).
+$UserManualLib = Join-Path $StageLib "user-manual"
+if (Test-Path $UserManualLib) {
+    $manualLauncher = @'
+@echo off
+rem Opens the bundled user manual in the system default browser.
+start "" "%~dp0lib\user-manual\index.html"
+'@
+    Set-Content -Path (Join-Path $StageApp "User Manual.cmd") -Value $manualLauncher -Encoding ASCII
+    Write-Host "  Created top-level 'User Manual.cmd' shortcut" -ForegroundColor Gray
+}
+
+# Theory manual: ship the LaTeX sources + any pre-built PDF that happens to
+# be present. Building the PDF requires a TeX toolchain that we do not assume.
+$TheorySrc = Join-Path $DocsSrc "theory-manual"
+if (Test-Path $TheorySrc) {
+    $TheoryPdf = Join-Path $TheorySrc "document.pdf"
+    if (Test-Path $TheoryPdf) {
+        Copy-Item $TheoryPdf (Join-Path $StageApp "theory-manual.pdf") -Force
+        Write-Host "  Bundled theory-manual.pdf" -ForegroundColor Gray
+    } else {
+        Write-Host "  Skipped theory-manual: no pre-built PDF at $TheoryPdf" -ForegroundColor DarkGray
+    }
+}
+
 # Launcher: starts virtualbow-gui.exe from inside lib/ so its directory is
 # searched for DLLs and Qt plugins automatically. /B keeps the console hidden.
 $LauncherPath = Join-Path $StageApp "VirtualBow.cmd"
