@@ -348,12 +348,37 @@ $ZipPath = Join-Path $OutputDir $ZipName
 
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 
-Compress-Archive -Path "$AppDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
+# Stage a "virtualbow/" root with a "lib/" subfolder that holds every binary
+# (exe, DLLs, Qt plugins, user-manual) and a tiny launcher at the top.
+# Windows resolves DLL imports relative to the exe's own directory and Qt
+# discovers its plugin folders (platforms/, imageformats/, ...) the same way,
+# so the layout stays truly portable: no PATH edits, no qt.conf, no installer.
+$StageRoot = Join-Path $BuildDir "stage"
+$StageApp  = Join-Path $StageRoot "virtualbow"
+$StageLib  = Join-Path $StageApp  "lib"
+if (Test-Path $StageRoot) { Remove-Item $StageRoot -Recurse -Force }
+New-Item -ItemType Directory -Path $StageLib -Force | Out-Null
+
+Copy-Item -Path (Join-Path $AppDir '*') -Destination $StageLib -Recurse -Force
+
+# Launcher: starts virtualbow-gui.exe from inside lib/ so its directory is
+# searched for DLLs and Qt plugins automatically. /B keeps the console hidden.
+$LauncherPath = Join-Path $StageApp "VirtualBow.cmd"
+$launcher = @'
+@echo off
+rem VirtualBow portable launcher
+rem Starts the GUI from the lib/ subdirectory so Windows resolves DLLs and
+rem Qt plugins relative to the executable's own location. Forward any args.
+start "" /D "%~dp0lib" "%~dp0lib\virtualbow-gui.exe" %*
+'@
+Set-Content -Path $LauncherPath -Value $launcher -Encoding ASCII
+
+Compress-Archive -Path (Join-Path $StageRoot '*') -DestinationPath $ZipPath -CompressionLevel Optimal
 
 $zipSize = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
 Write-Host "`nPortable package created: $ZipPath ($zipSize MB)" -ForegroundColor Green
-$topItems = Get-ChildItem $AppDir |
+$topItems = Get-ChildItem $StageApp |
     Select-Object Name, @{N="Size(KB)";E={[math]::Round($_.Length/1KB,0)}} |
     Format-Table -AutoSize | Out-String
-Write-Host "Top-level contents of application directory:" -ForegroundColor Cyan
+Write-Host "ZIP root layout (virtualbow/):" -ForegroundColor Cyan
 Write-Host $topItems

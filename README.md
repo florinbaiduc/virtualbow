@@ -63,6 +63,17 @@ The script will:
 6. Copy `ffmpeg.exe` (required for video export)
 7. Produce `virtualbow-portable-<version>-windows-x64.zip`
 
+The ZIP unpacks to a `virtualbow/` folder with this layout:
+
+```
+virtualbow/
+├── VirtualBow.cmd     ← double-click to launch
+└── lib/               ← exe, DLLs, Qt plugins, user manual
+```
+
+The launcher starts the GUI from inside `lib/` so Windows finds DLLs and Qt
+plugins next to the executable — no installer, no PATH edits, no admin rights.
+
 **Optional flags:**
 
 | Flag | Effect |
