@@ -112,6 +112,15 @@ impl<'a> Simulation<'a> {
     const BRACING_MAX_ROOT_ITER: usize = 20;
     const BRACING_TARGET_ITER: usize = 5;
 
+    // Numerical constants for the asymmetric refinement (2D Newton on the
+    // independent unstressed-length factors of the upper and lower string
+    // halves).  For symmetric bows this stage converges immediately.
+    const ASYM_BRACING_MAX_ITER: usize = 10;
+    const ASYM_BRACING_FD_STEP: f64 = 1.0e-5;
+    const ASYM_BRACING_R1_TOL: f64 = 1.0e-7;    // collinearity metric
+    const ASYM_BRACING_R2_TOL: f64 = 1.0e-3;    // nock reaction (Newtons)
+    const ASYM_BRACING_MAX_STEP: f64 = 0.01;
+
     fn build_chain(
         system: &mut System,
         _side: LimbSide,
@@ -514,6 +523,98 @@ impl<'a> Simulation<'a> {
                     return Err(ModelError::SimulationBracingNoSignChange);
                 }
             }
+
+            // ----- Asymmetric refinement -----
+            //
+            // Real-world bows have ONE continuous string knotted at the nock.
+            // The knot does not slip, so the upper and lower halves can carry
+            // different tensions, but the nock itself must be in self-
+            // equilibrium at brace (the archer's hand applies no force).
+            //
+            // The 1D bracing above only enforces collinearity of the string
+            // at the nock — it tunes one scalar `factor` shared by both
+            // halves.  For a SYMMETRIC bow the y-reaction at the nock is
+            // zero by symmetry once collinearity holds, so we are done.
+            // For an ASYMMETRIC bow (e.g. yumi) the two halves still carry
+            // unequal tensions in this state, leaving a residual y-force at
+            // the nock that shows up as a non-zero `draw_force[0]` in the
+            // static result.
+            //
+            // We refine here with a 2D Newton iteration on (f_u, f_l) — the
+            // unstressed-length factors of the two halves, taken
+            // independently — driving BOTH the collinearity metric AND the
+            // nock's constraint reaction (the Lagrange multiplier λ from
+            // DisplacementControl, which equals the y-force the string must
+            // exert on the nock to keep it pinned at brace_pos) to zero.
+            //
+            // Starting point: f_u = f_l = (current scalar factor).  For a
+            // symmetric bow the iteration converges in one step (residuals
+            // already at machine precision).  For an asymmetric bow, the
+            // halves drift apart by a small fraction of a percent — within
+            // the latitude any real bowyer has when tying off the string.
+            let f0 = system.element_ref::<StringElement>(string_element_upper).get_initial_length()/unstressed_length_upper;
+            let mut f_u = f0;
+            let mut f_l = f0;
+
+            let mut try_lengths = |f_u: f64, f_l: f64| -> (f64, f64, bool) {
+                system.element_mut::<StringElement>(string_element_upper).set_initial_length(f_u*unstressed_length_upper);
+                system.element_mut::<StringElement>(string_element_lower).set_initial_length(f_l*unstressed_length_lower);
+                let tolerances = StaticTolerances::new(s_eval_total, FRAC_PI_2, model.settings.static_iteration_tolerance);
+                let settings = NewtonSettings::default();
+                let solver = DisplacementControl::new(&mut system, tolerances, settings);
+                match solver.solve_equilibrium(nock_node.y(), 0.0) {
+                    Ok(info) => {
+                        let r1 = get_collinearity_metric(&system);
+                        // λ is the load-factor multiplier; the applied
+                        // reference force at nock_y was -1 N, so the
+                        // string's net y-pull on the nock is -λ.  Driving
+                        // λ → 0 gives a freely-supported nock at brace.
+                        let r2 = info.λ;
+                        (r1, r2, true)
+                    }
+                    Err(_) => (0.0, 0.0, false),
+                }
+            };
+
+            for iter in 0..Self::ASYM_BRACING_MAX_ITER {
+                let (r1, r2, ok) = try_lengths(f_u, f_l);
+                if !ok { break; }
+                if r1.abs() < Self::ASYM_BRACING_R1_TOL && r2.abs() < Self::ASYM_BRACING_R2_TOL {
+                    break;
+                }
+                if iter == Self::ASYM_BRACING_MAX_ITER - 1 { break; }
+
+                // Finite-difference Jacobian.
+                let h = Self::ASYM_BRACING_FD_STEP;
+                let (r1_du, r2_du, ok_u) = try_lengths(f_u + h, f_l);
+                if !ok_u { break; }
+                let (r1_dl, r2_dl, ok_l) = try_lengths(f_u, f_l + h);
+                if !ok_l { break; }
+                let j11 = (r1_du - r1)/h;
+                let j21 = (r2_du - r2)/h;
+                let j12 = (r1_dl - r1)/h;
+                let j22 = (r2_dl - r2)/h;
+
+                let det = j11*j22 - j12*j21;
+                if det.abs() < 1e-30 { break; }
+                let mut df_u = -(j22*r1 - j12*r2)/det;
+                let mut df_l = -(-j21*r1 + j11*r2)/det;
+
+                // Damp large steps: the fiber strain is ~(f - 1) so a step
+                // of 1% in f corresponds to ~1% strain change.
+                let step_norm = (df_u*df_u + df_l*df_l).sqrt();
+                if step_norm > Self::ASYM_BRACING_MAX_STEP {
+                    let scale = Self::ASYM_BRACING_MAX_STEP/step_norm;
+                    df_u *= scale;
+                    df_l *= scale;
+                }
+                f_u += df_u;
+                f_l += df_l;
+            }
+
+            // Restore the converged lengths in case the last iteration was
+            // a Jacobian probe.
+            let _ = try_lengths(f_u, f_l);
         }
 
         // String damping & string-tip / nock additional masses.
