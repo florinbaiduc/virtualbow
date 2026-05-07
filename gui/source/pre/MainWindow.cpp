@@ -272,6 +272,14 @@ void MainWindow::runSimulation(Mode mode) {
         return;
     }
 
+    // Flush pending edits from the focused editor widget into the model.
+    // Without this, a value typed into a spinbox/line edit (e.g. brace
+    // height) that has not lost focus yet is still buffered in the editor
+    // and the simulation runs against the stale model. The same call is
+    // performed before saving; running a simulation is just as much a
+    // "commit point" as saving and must see the same data.
+    submitChanges();
+
     // Run Simulation, launch Post on results if successful
     SimulationDialog dialog(this, mainModel->getBow(), mode);
     if(dialog.exec() == QDialog::Accepted) {
