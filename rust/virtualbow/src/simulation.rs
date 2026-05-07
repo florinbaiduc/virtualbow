@@ -408,24 +408,64 @@ impl<'a> Simulation<'a> {
 
         // ----- Bracing simulation (only if string is enabled) -----
         if string {
-            // Slope at the nock measured on the upper-side string.  Uses the
-            // first two contacts of the upper string element (the nock is
-            // always at index 0 of the upper element's node list, hence
-            // always present in its convex envelope).
-            let get_string_slope = |system: &System| -> f64 {
-                let elem = system.element_ref::<StringElement>(string_element_upper);
-                let mut it = elem.contact_positions();
-                let p0 = it.next().expect("at least two string contacts");
-                let p1 = it.next().expect("at least two string contacts");
-                (p1[1] - p0[1])/(p1[0] - p0[0])
+            // Bracing criterion: the string must run STRAIGHT through the
+            // nock at brace, i.e. the nock must lie on the line connecting
+            // its two adjacent string-contact points (one on each limb).
+            // For a symmetric bow this reduces to the classic "upper-side
+            // string is horizontal at the nock" condition (slope = 0).  For
+            // an asymmetric bow (e.g. yumi), upper- and lower-side string
+            // segments leave the nock at different angles; requiring the
+            // string to be collinear at the nock is the natural extension
+            // and produces a visually correct brace where the string is
+            // not artificially V-bent at the nock — without this, frame 0
+            // of the static simulation looks pre-drawn.
+            //
+            // The metric is the signed cross product of the two segments
+            // emanating from the nock; it is zero when they are collinear
+            // (i.e. point in opposite directions).  For the upper string
+            // element, contact 0 is the nock and contact 1 is the next
+            // contact toward the upper limb tip.  For the lower string
+            // element (whose nodes run [lower_tip, …, nock]), the nock is
+            // the LAST contact and the previous one is the next contact
+            // toward the lower limb tip.
+            let get_collinearity_metric = |system: &System| -> f64 {
+                let elem_u = system.element_ref::<StringElement>(string_element_upper);
+                let mut it_u = elem_u.contact_positions();
+                let p_n = it_u.next().expect("at least two upper string contacts");
+                let p_u = it_u.next().expect("at least two upper string contacts");
+
+                let elem_l = system.element_ref::<StringElement>(string_element_lower);
+                let mut p_l_prev: Option<SVector<f64, 2>> = None;
+                let mut p_l_last: Option<SVector<f64, 2>> = None;
+                for p in elem_l.contact_positions() {
+                    p_l_prev = p_l_last;
+                    p_l_last = Some(p);
+                }
+                let p_l = p_l_prev.expect("at least two lower string contacts");
+
+                // Signed cross product of (p_l - p_n) × (p_u - p_n).
+                // Zero ⇔ p_u, p_n, p_l are collinear AND p_n lies on the
+                // segment between them (string passes straight through).
+                // We normalise by (p_u.x - p_n.x) so the metric reduces
+                // exactly to the previous "upper slope" expression for a
+                // symmetric bow (where p_l is the mirror of p_u and the
+                // metric is 2·slope_upper·(p_u.x - p_n.x), preserving the
+                // sign of the original criterion: positive at the unbraced
+                // start, decreasing through zero at brace).
+                let dx_u = p_u[0] - p_n[0];
+                let dy_u = p_u[1] - p_n[1];
+                let dx_l = p_l[0] - p_n[0];
+                let dy_l = p_l[1] - p_n[1];
+                (dy_l*dx_u - dx_l*dy_u)/dx_u
             };
 
             // Apply a unit downward force on the nock so DisplacementControl has
-            // a reference direction (matches v4).
+            // a reference direction.  This also gives the static-draw solver
+            // a non-zero load vector to scale via its load factor.
             system.add_force(nock_node.y(), move |_t| -1.0);
 
             let mut factor1 = 1.0;
-            let mut slope1 = get_string_slope(&system);
+            let mut slope1 = get_collinearity_metric(&system);
             let mut delta = Self::BRACING_DELTA_START;
 
             if slope1 < 0.0 {
@@ -441,7 +481,7 @@ impl<'a> Simulation<'a> {
                 let settings = NewtonSettings::default();
                 let solver = DisplacementControl::new(&mut system, tolerances, settings);
                 let result = solver.solve_equilibrium(nock_node.y(), 0.0);
-                let slope = get_string_slope(&system);
+                let slope = get_collinearity_metric(&system);
                 (slope, result)
             };
 
