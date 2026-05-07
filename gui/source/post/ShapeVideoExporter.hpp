@@ -32,16 +32,22 @@ public:
     // matches what the user currently sees. `data` provides the bow Common
     // info plus the Static and Dynamic States.
     //
-    // `hold_seconds`   : how long to freeze on the final pulling frame.
-    // `static_seconds` : how long the pulling phase should play. The static
-    //                    simulation typically produces only a few states
-    //                    (driven by the user's `n_draw_steps`); we step-
-    //                    stretch them across `static_seconds * fps` frames
-    //                    so the motion reads as smooth instead of staccato.
-    //                    Set to 0 to emit one output frame per source state.
+    // `hold_seconds`    : how long to freeze on the final pulling frame.
+    // `static_seconds`  : how long the pulling phase should play. The static
+    //                     simulation typically produces only a few states
+    //                     (driven by the user's `n_draw_steps`); we step-
+    //                     stretch them across `static_seconds * fps` frames
+    //                     so the motion reads as smooth instead of staccato.
+    //                     Set to 0 to emit one output frame per source state.
+    // `dynamic_seconds` : how long the release phase should play. The arrow
+    //                     flight is physically very short (often 10-30 ms),
+    //                     so we slow it down for visibility. The frame count
+    //                     is the larger of `dynamic_seconds * fps` and the
+    //                     real-time frame count (so we never drop detail).
     ShapeVideoExporter(QWidget* parent_widget, ShapePlot* size_reference,
                        const BowResult& data,
-                       double hold_seconds = 2.0, double static_seconds = 3.0);
+                       double hold_seconds = 2.0, double static_seconds = 3.0,
+                       double dynamic_seconds = 2.0);
 
     ~ShapeVideoExporter();
 
@@ -54,6 +60,7 @@ private:
     const BowResult& data;
     double hold_seconds;
     double static_seconds;
+    double dynamic_seconds;
 
     // Synthetic States combining the static and dynamic phases. Held by
     // value so it outlives the off-screen ShapePlot, which keeps a const

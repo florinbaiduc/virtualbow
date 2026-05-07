@@ -24,11 +24,39 @@
 param(
     [switch]$SkipRustBuild,
     [switch]$SkipCppBuild,
-    [string]$OutputDir = $PSScriptRoot
+    [string]$OutputDir = $PSScriptRoot,
+    # MSYS2 install root. Resolution order:
+    #   1. -Msys2Root command-line argument
+    #   2. $env:MSYS2_ROOT environment variable
+    #   3. Auto-detect across common install locations
+    [string]$Msys2Root
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Resolve-Msys2Root([string]$Override) {
+    if ($Override) { return $Override }
+    if ($env:MSYS2_ROOT) { return $env:MSYS2_ROOT }
+    $candidates = @(
+        "C:\msys64",
+        "D:\msys64",
+        "$env:SystemDrive\msys64",
+        "$env:USERPROFILE\msys64",
+        "$env:ProgramFiles\msys64",
+        "$env:LOCALAPPDATA\msys64"
+    ) | Where-Object { $_ } | Select-Object -Unique
+    foreach ($c in $candidates) {
+        if (Test-Path (Join-Path $c "usr\bin\pacman.exe")) { return $c }
+    }
+    $gcc = Get-Command gcc.exe -ErrorAction SilentlyContinue
+    if ($gcc) {
+        $dir = Split-Path -Parent $gcc.Source
+        $root = Split-Path -Parent (Split-Path -Parent $dir)
+        if (Test-Path (Join-Path $root "usr\bin\pacman.exe")) { return $root }
+    }
+    throw "Could not locate MSYS2. Pass -Msys2Root, set `$env:MSYS2_ROOT, or install to a standard location."
+}
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -37,9 +65,10 @@ $GuiDir       = Join-Path $ScriptDir "gui"
 $RustDir      = Join-Path $ScriptDir "rust"
 $BuildDir     = Join-Path $ScriptDir "build"
 $AppDir       = Join-Path $BuildDir "application"
-$Msys2Root    = "C:\msys64"
-$Mingw64Bin   = "$Msys2Root\mingw64\bin"
-$Pacman       = "$Msys2Root\usr\bin\pacman.exe"
+$Msys2Root    = Resolve-Msys2Root $Msys2Root
+$Mingw64Bin   = Join-Path $Msys2Root "mingw64\bin"
+$Msys2UsrBin  = Join-Path $Msys2Root "usr\bin"
+$Pacman       = Join-Path $Msys2UsrBin "pacman.exe"
 $RustTarget   = "x86_64-pc-windows-gnu"
 $AppVersion   = "0.11.0"
 
@@ -63,11 +92,11 @@ function Invoke-Command-Required([string]$Executable, [string[]]$Arguments, [str
 # live in the MSYS2 mingw64 bin directory but are not yet in $AppDir.
 # Excludes ffmpeg codec DLLs (av*, sw*, xvidcore) to keep the scan focused;
 # those are handled separately by the ffmpeg DLL deploy step.
-function Get-MissingMingwDlls([string]$ScanDir, [string]$Mingw64Bin) {
+function Get-MissingMingwDlls([string]$ScanDir, [string]$Mingw64Bin, [string]$Msys2UsrBin) {
     $ldd = Join-Path $Mingw64Bin "ldd.exe"
     if (-not (Test-Path $ldd)) {
         # Fallback: ldd ships in MSYS2 usr/bin
-        $ldd = "C:\msys64\usr\bin\ldd.exe"
+        $ldd = Join-Path $Msys2UsrBin "ldd.exe"
     }
     $missing = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $bins = Get-ChildItem $ScanDir -Recurse -Include "*.dll","*.exe" |
@@ -130,7 +159,7 @@ if ($ToInstall.Count -gt 0) {
 
 Write-Step "Configuring environment PATH"
 
-$env:PATH = "$Mingw64Bin;$Msys2Root\usr\bin;$env:PATH"
+$env:PATH = "$Mingw64Bin;$Msys2UsrBin;$env:PATH"
 Write-Host "Prepended $Mingw64Bin to PATH"
 
 # ── Step 3: Build Rust FFI (GNU target) ───────────────────────────────────────
@@ -235,7 +264,7 @@ Write-Host "windeployqt6 completed." -ForegroundColor Green
 Write-Step "Copying MinGW runtime DLLs (auto-discovered via ldd)"
 
 # First pass: copy DLLs required by Qt plugins and main exe
-$needed = Get-MissingMingwDlls -ScanDir $AppDir -Mingw64Bin $Mingw64Bin
+$needed = Get-MissingMingwDlls -ScanDir $AppDir -Mingw64Bin $Mingw64Bin -Msys2UsrBin $Msys2UsrBin
 foreach ($dll in ($needed | Sort-Object)) {
     $src = Join-Path $Mingw64Bin $dll
     if (Test-Path $src) {
@@ -251,7 +280,7 @@ foreach ($dll in ($needed | Sort-Object)) {
 }
 
 # Second pass: re-scan now that new DLLs are present (they may have their own deps)
-$needed2 = Get-MissingMingwDlls -ScanDir $AppDir -Mingw64Bin $Mingw64Bin
+$needed2 = Get-MissingMingwDlls -ScanDir $AppDir -Mingw64Bin $Mingw64Bin -Msys2UsrBin $Msys2UsrBin
 foreach ($dll in ($needed2 | Sort-Object)) {
     $src = Join-Path $Mingw64Bin $dll
     if (Test-Path $src) {
@@ -279,8 +308,8 @@ if (Test-Path $ffmpegSrc) {
     }
 
     # Discover and copy ffmpeg codec DLLs (av*, sw*, etc.)
-    $ldd = "C:\msys64\mingw64\bin\ldd.exe"
-    if (-not (Test-Path $ldd)) { $ldd = "C:\msys64\usr\bin\ldd.exe" }
+    $ldd = Join-Path $Mingw64Bin "ldd.exe"
+    if (-not (Test-Path $ldd)) { $ldd = Join-Path $Msys2UsrBin "ldd.exe" }
     $ffmpegDeps = & $ldd (Join-Path $AppDir "ffmpeg.exe") 2>$null |
         Where-Object { $_ -match "^\s+(\S+\.dll)\s+=>\s+/mingw64/bin/" } |
         ForEach-Object { $_ -replace ".*?(\S+\.dll)\s+=>\s+.*", '$1' }

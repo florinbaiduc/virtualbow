@@ -42,11 +42,11 @@ When in doubt, see the CI build definitions of [virtualbow](.github/workflows/bu
 
 #### Automated portable build (recommended)
 
-A PowerShell script is provided that handles all steps automatically and produces a self-contained portable ZIP that runs on any Windows machine without installation:
+A PowerShell script handles every step automatically and produces a self-contained portable ZIP that runs on any Windows machine without installation:
 
 **Prerequisites:**
 - [Rust + Cargo](https://rustup.rs) — installed and on PATH
-- [MSYS2](https://www.msys2.org) — installed at `C:\msys64`
+- [MSYS2](https://www.msys2.org) — install location auto-detected (or pass `-Msys2Root`, or set `$env:MSYS2_ROOT`)
 
 Then run from the repository root:
 
@@ -55,7 +55,7 @@ powershell -ExecutionPolicy Bypass -File .\build-portable.ps1
 ```
 
 The script will:
-1. Install all required MSYS2 mingw64 packages (Qt6, GCC 16, Ninja, Catch2, nlohmann-json, ffmpeg)
+1. Install all required MSYS2 mingw64 packages (Qt6, GCC, Ninja, Catch2, nlohmann-json, ffmpeg)
 2. Add the `x86_64-pc-windows-gnu` Rust target and compile the FFI bridge library
 3. Configure and build the C++ GUI with CMake + Ninja
 4. Run `windeployqt6` to bundle Qt6 plugins
@@ -70,10 +70,25 @@ The script will:
 | `-SkipRustBuild` | Skip rebuilding the Rust FFI library |
 | `-SkipCppBuild` | Skip reconfiguring and rebuilding the C++ GUI |
 | `-OutputDir <path>` | Directory for the output ZIP (default: repository root) |
+| `-Msys2Root <path>` | Override MSYS2 install location |
+
+#### Developer (incremental) build
+
+For day-to-day development:
+
+```powershell
+.\build-dev.ps1                          # build virtualbow-gui (default)
+.\build-dev.ps1 -Target virtualbow-test  # build the test target
+.\build-dev.ps1 -Reconfigure             # re-run cmake before building
+.\build-dev.ps1 -Clean                   # wipe build/ and start fresh
+.\build-dev.ps1 -NoInstall               # skip prereq verification
+```
+
+The script auto-detects MSYS2, installs any missing mingw64 packages, ensures the `x86_64-pc-windows-gnu` Rust target is present, then runs CMake + Ninja. See [BUILDING-WINDOWS.md](BUILDING-WINDOWS.md) for details and troubleshooting.
 
 #### Manual build (advanced)
 
-Using GCC from [MSYS2](https://www.msys2.org) (mingw64 environment) and Qt6:
+Using GCC from [MSYS2](https://www.msys2.org) (mingw64 environment) and Qt6. Replace `<msys2>` below with your MSYS2 install root (default: `C:/msys64`):
 
 ```powershell
 # Install dependencies (once)
@@ -90,9 +105,9 @@ cargo build --release --target x86_64-pc-windows-gnu -p virtualbow_ffi
 # Build the GUI
 mkdir build; cd build
 cmake ../gui -G Ninja -DCMAKE_BUILD_TYPE=Release `
-    -DCMAKE_PREFIX_PATH=C:/msys64/mingw64 `
-    -DCMAKE_C_COMPILER=C:/msys64/mingw64/bin/gcc.exe `
-    -DCMAKE_CXX_COMPILER=C:/msys64/mingw64/bin/g++.exe
+    -DCMAKE_PREFIX_PATH=<msys2>/mingw64 `
+    -DCMAKE_C_COMPILER=<msys2>/mingw64/bin/gcc.exe `
+    -DCMAKE_CXX_COMPILER=<msys2>/mingw64/bin/g++.exe
 cmake --build . --target virtualbow-gui
 ```
 

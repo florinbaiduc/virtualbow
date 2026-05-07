@@ -207,13 +207,15 @@ void compute_unified_ranges(const Common& common,
 
 ShapeVideoExporter::ShapeVideoExporter(QWidget* parent_widget, ShapePlot* size_reference,
                                        const BowResult& data,
-                                       double hold_seconds, double static_seconds)
+                                       double hold_seconds, double static_seconds,
+                                       double dynamic_seconds)
     : QObject(parent_widget),
       parent_widget(parent_widget),
       size_reference(size_reference),
       data(data),
       hold_seconds(hold_seconds),
-      static_seconds(static_seconds)
+      static_seconds(static_seconds),
+      dynamic_seconds(dynamic_seconds)
 {
     // Pre-build the combined States now so the off-screen ShapePlot can hold
     // a stable const reference into it for the rest of the exporter's life.
@@ -318,7 +320,23 @@ bool ShapeVideoExporter::run() {
     const int n_hold = (n_static > 0)
         ? std::max(0, static_cast<int>(std::lround(hold_seconds * fps)))
         : 0;
-    const int total_frames = n_prefix_frames + n_hold + n_dynamic;
+
+    // Resample the dynamic phase to uniform time intervals so the arrow moves
+    // at visually constant speed. The adaptive ODE solver produces states at
+    // non-uniform timestamps; emitting one frame per state would make the
+    // arrow appear to speed up and slow down erratically.
+    //
+    // The physical release is very short (typically 10-30 ms) — at 30 fps
+    // that's well under one frame. We stretch it to `dynamic_seconds` of
+    // playback (slow motion) so the user can actually see the arrow fly,
+    // never dropping below one frame per source state.
+    const auto& dyn_time = data.dynamics->states.time;
+    const double dynamic_duration = dyn_time.back() - dyn_time.front();
+    const int n_dynamic_realtime = std::max(2, static_cast<int>(std::lround(dynamic_duration * fps)));
+    const int n_dynamic_slowmo   = std::max(2, static_cast<int>(std::lround(dynamic_seconds * fps)));
+    const int n_dynamic_frames   = std::max({n_dynamic_realtime, n_dynamic_slowmo, n_dynamic});
+
+    const int total_frames = n_prefix_frames + n_hold + n_dynamic_frames;
 
     // Indices into `combined_states`:
     //   static phase  : 0 .. n_static - 1
@@ -394,10 +412,26 @@ bool ShapeVideoExporter::run() {
         if(!write_frame(ramp_end_idx)) return false;
     }
 
-    // Phase 3: dynamic (release) frames. The first frame (dynamic_offset)
-    // matches the hold frame above byte-for-byte, so no transition pop.
-    for(int i = 0; i < n_dynamic; ++i) {
-        if(!write_frame(dynamic_offset + i)) return false;
+    // Phase 3: dynamic (release) frames, resampled at uniform time intervals.
+    // For each output frame, find the nearest simulation state by timestamp.
+    // The first frame maps to dynamic_offset (same as the hold frame above)
+    // so there is no transition pop.
+    for(int i = 0; i < n_dynamic_frames; ++i) {
+        const double target_t = dyn_time.front()
+            + static_cast<double>(i) * dynamic_duration / (n_dynamic_frames - 1);
+        auto it = std::lower_bound(dyn_time.begin(), dyn_time.end(), target_t);
+        int dyn_idx;
+        if(it == dyn_time.end()) {
+            dyn_idx = n_dynamic - 1;
+        } else if(it == dyn_time.begin()) {
+            dyn_idx = 0;
+        } else {
+            auto prev = std::prev(it);
+            dyn_idx = (target_t - *prev <= *it - target_t)
+                ? static_cast<int>(prev - dyn_time.begin())
+                : static_cast<int>(it  - dyn_time.begin());
+        }
+        if(!write_frame(dynamic_offset + dyn_idx)) return false;
     }
     progress.setValue(total_frames);
 
