@@ -1,0 +1,360 @@
+{
+  "version": "0.11.0",
+  "comment": "Curved yumi with reflex profile and a three-layer bamboo/wood/bamboo laminate.",
+  "settings": {
+    "num_limb_elements": 40,
+    "num_limb_eval_points": 250,
+    "min_draw_resolution": 200,
+    "max_draw_resolution": 200,
+    "static_iteration_tolerance": 1e-6,
+    "arrow_clamp_force": 0.3,
+    "string_compression_factor": 4e-6,
+    "timespan_factor": 3.0,
+    "timeout_factor": 10.0,
+    "min_timestep": 0.00001,
+    "max_timestep": 0.0001,
+    "steps_per_period": 500,
+    "dynamic_iteration_tolerance": 1e-6
+  },
+  "handle": {
+    "type": "rigid",
+    "value": {
+      "length_upper": 0.0,
+      "length_lower": 0.1,
+      "angle": 0.0,
+      "pivot": 0.001
+    }
+  },
+  "draw": {
+    "brace_height": 0.165,
+    "draw_length": {
+      "type": "standard",
+      "value": 0.9500000000000001
+    },
+    "nock_offset": 0.01
+  },
+  "profile": {
+    "upper": [
+      {
+        "type": "spline",
+        "parameters": {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.35000000000000003,
+              0.025
+            ],
+            [
+              0.7975,
+              0.045
+            ],
+            [
+              1.16,
+              0.035
+            ],
+            [
+              1.45,
+              0.06
+            ]
+          ]
+        }
+      },
+      {
+        "type": "arc",
+        "parameters": {
+          "length": 0.1,
+          "radius": 0.4
+        }
+      }
+    ],
+    "lower": [
+      {
+        "type": "spline",
+        "parameters": {
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.20400000000000001,
+              0.01
+            ],
+            [
+              0.37400000000000005,
+              0.016
+            ],
+            [
+              0.544,
+              0.02
+            ],
+            [
+              0.68,
+              0.04
+            ]
+          ]
+        }
+      },
+      {
+        "type": "arc",
+        "parameters": {
+          "length": 0.1,
+          "radius": 0.5
+        }
+      }
+    ]
+  },
+  "section": {
+    "materials": [
+      {
+        "name": "Bamboo",
+        "color": "#d9b377",
+        "density": 700.0,
+        "youngs_modulus": 16000000000.0,
+        "shear_modulus": 6000000000.0,
+        "tensile_strength": 110000000.0,
+        "compressive_strength": 60000000.0,
+        "safety_margin": 1.0
+      },
+      {
+        "name": "Wood",
+        "color": "#8a5a30",
+        "density": 600.0,
+        "youngs_modulus": 10000000000.0,
+        "shear_modulus": 3500000000.0,
+        "tensile_strength": 80000000.0,
+        "compressive_strength": 50000000.0,
+        "safety_margin": 1.0
+      }
+    ],
+    "upper": {
+      "alignment": {
+        "type": "section_center"
+      },
+      "width": [
+        [
+          0.0,
+          0.025
+        ],
+        [
+          0.5,
+          0.02
+        ],
+        [
+          1.0,
+          0.02
+        ]
+      ],
+      "layers": [
+        {
+          "name": "Bamboo (back)",
+          "material": "Bamboo",
+          "height": [
+            [
+              0.0,
+              0.004
+            ],
+            [
+              1.0,
+              0.003
+            ]
+          ]
+        },
+        {
+          "name": "Wood core",
+          "material": "Wood",
+          "height": [
+            [
+              0.0,
+              0.01085
+            ],
+            [
+              0.08,
+              0.01062
+            ],
+            [
+              0.17,
+              0.01028
+            ],
+            [
+              0.25,
+              0.00981
+            ],
+            [
+              0.33,
+              0.00941
+            ],
+            [
+              0.42,
+              0.00905
+            ],
+            [
+              0.5,
+              0.00892
+            ],
+            [
+              0.58,
+              0.00862
+            ],
+            [
+              0.67,
+              0.00838
+            ],
+            [
+              0.75,
+              0.00787
+            ],
+            [
+              0.8300000000000001,
+              0.00749
+            ],
+            [
+              0.92,
+              0.00704
+            ],
+            [
+              1.0,
+              0.00688
+            ]
+          ]
+        },
+        {
+          "name": "Bamboo (belly)",
+          "material": "Bamboo",
+          "height": [
+            [
+              0.0,
+              0.004
+            ],
+            [
+              1.0,
+              0.003
+            ]
+          ]
+        }
+      ]
+    },
+    "lower": {
+      "alignment": {
+        "type": "section_center"
+      },
+      "width": [
+        [
+          0.0,
+          0.025
+        ],
+        [
+          0.5,
+          0.02
+        ],
+        [
+          1.0,
+          0.02
+        ]
+      ],
+      "layers": [
+        {
+          "name": "Bamboo (back)",
+          "material": "Bamboo",
+          "height": [
+            [
+              0.0,
+              0.004
+            ],
+            [
+              1.0,
+              0.003
+            ]
+          ]
+        },
+        {
+          "name": "Wood core",
+          "material": "Wood",
+          "height": [
+            [
+              0.0,
+              0.01085
+            ],
+            [
+              0.1,
+              0.01078
+            ],
+            [
+              0.2,
+              0.01057
+            ],
+            [
+              0.3,
+              0.01007
+            ],
+            [
+              0.4,
+              0.00949
+            ],
+            [
+              0.5,
+              0.00898
+            ],
+            [
+              0.6,
+              0.00864
+            ],
+            [
+              0.7000000000000001,
+              0.00823
+            ],
+            [
+              0.8,
+              0.00772
+            ],
+            [
+              0.9,
+              0.00748
+            ],
+            [
+              1.0,
+              0.0069
+            ]
+          ]
+        },
+        {
+          "name": "Bamboo (belly)",
+          "material": "Bamboo",
+          "height": [
+            [
+              0.0,
+              0.004
+            ],
+            [
+              1.0,
+              0.004
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "string": {
+    "strand_stiffness": 3500.0,
+    "strand_density": 0.0005,
+    "n_strands": 14
+  },
+  "masses": {
+    "arrow": {
+      "type": "mass",
+      "value": 0.054
+    },
+    "limb_tip_upper": 0.02,
+    "limb_tip_lower": 0.015,
+    "string_nock": 0.003,
+    "string_tip_upper": 0.003,
+    "string_tip_lower": 0.003
+  },
+  "damping": {
+    "damping_ratio_limbs": 0.05,
+    "damping_ratio_string": 0.05
+  }
+}

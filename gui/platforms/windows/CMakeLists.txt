@@ -1,0 +1,28 @@
+# Define math constants for MSVC
+target_compile_definitions(virtualbow-gui PRIVATE _USE_MATH_DEFINES)
+
+# Set executable icons
+target_sources(virtualbow-gui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/icons-gui.rc)
+
+# Make virtualbow-gui a GUI application
+set_target_properties(virtualbow-gui PROPERTIES WIN32_EXECUTABLE TRUE)
+
+# Copy necessary resources into application directory
+file(COPY ${CMAKE_SOURCE_DIR}/resources/docs/user-manual DESTINATION ${CMAKE_BINARY_DIR}/application)
+
+# Target: Copy shared libraries to application directory with windeployqt
+add_custom_target(copy-dependencies DEPENDS virtualbow-gui virtualbow-cli)
+add_custom_command(
+    TARGET copy-dependencies
+    COMMAND ${QT_BINARY_DIR}/windeployqt
+    ${CMAKE_BINARY_DIR}/application/virtualbow-gui.exe
+    ${CMAKE_BINARY_DIR}/application/virtualbow-cli.exe
+)
+
+# Target: Inno Setup installer
+configure_file(setup.iss ${CMAKE_BINARY_DIR}/setup.iss)
+add_custom_target(iss-installer DEPENDS copy-dependencies)
+add_custom_command(
+    TARGET iss-installer
+    COMMAND ISCC ${CMAKE_BINARY_DIR}/setup.iss /O${CMAKE_BINARY_DIR}/packages /Fvirtualbow-setup
+)

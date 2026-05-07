@@ -1,0 +1,9 @@
+[book]
+authors = ["Stefan Pfeifer"]
+language = "en"
+multilingual = false
+src = "source"
+title = "User Manual - VirtualBow v0.9.1"
+
+[output.html]
+mathjax-support = true

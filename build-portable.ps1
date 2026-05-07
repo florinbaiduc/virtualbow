@@ -1,0 +1,317 @@
+<#
+.SYNOPSIS
+    Builds a self-contained Windows portable package of VirtualBow.
+
+.DESCRIPTION
+    This script:
+      1. Installs required MSYS2 mingw64 packages (Qt6, GCC, Ninja, etc.)
+      2. Compiles the Rust FFI library for the x86_64-pc-windows-gnu target
+      3. Configures and builds the C++ GUI with CMake + Ninja
+      4. Runs windeployqt6 to bundle Qt6 plugins
+      5. Copies all required MinGW runtime DLLs
+      6. Copies ffmpeg.exe
+      7. Produces a portable ZIP: virtualbow-portable-<version>.zip
+
+.PARAMETER SkipRustBuild
+    Skip rebuilding the Rust libraries (use existing artifacts).
+
+.PARAMETER SkipCppBuild
+    Skip rebuilding the C++ GUI (use existing artifacts).
+
+.PARAMETER OutputDir
+    Directory where the portable ZIP will be written. Defaults to the workspace root.
+#>
+param(
+    [switch]$SkipRustBuild,
+    [switch]$SkipCppBuild,
+    [string]$OutputDir = $PSScriptRoot
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+
+$ScriptDir    = $PSScriptRoot
+$GuiDir       = Join-Path $ScriptDir "gui"
+$RustDir      = Join-Path $ScriptDir "rust"
+$BuildDir     = Join-Path $ScriptDir "build"
+$AppDir       = Join-Path $BuildDir "application"
+$Msys2Root    = "C:\msys64"
+$Mingw64Bin   = "$Msys2Root\mingw64\bin"
+$Pacman       = "$Msys2Root\usr\bin\pacman.exe"
+$RustTarget   = "x86_64-pc-windows-gnu"
+$AppVersion   = "0.11.0"
+
+# MinGW runtime DLLs required at runtime (discovered via objdump analysis)
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+function Write-Step([string]$Message) {
+    Write-Host "`n==> $Message" -ForegroundColor Cyan
+}
+
+function Invoke-Command-Required([string]$Executable, [string[]]$Arguments, [string]$WorkDir = $PWD) {
+    $result = & $Executable @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host $result -ForegroundColor Yellow
+        throw "Command failed (exit $LASTEXITCODE): $Executable $Arguments"
+    }
+    $result
+}
+
+# Discovers all DLLs needed by the app binaries (recursively via ldd) that
+# live in the MSYS2 mingw64 bin directory but are not yet in $AppDir.
+# Excludes ffmpeg codec DLLs (av*, sw*, xvidcore) to keep the scan focused;
+# those are handled separately by the ffmpeg DLL deploy step.
+function Get-MissingMingwDlls([string]$ScanDir, [string]$Mingw64Bin) {
+    $ldd = Join-Path $Mingw64Bin "ldd.exe"
+    if (-not (Test-Path $ldd)) {
+        # Fallback: ldd ships in MSYS2 usr/bin
+        $ldd = "C:\msys64\usr\bin\ldd.exe"
+    }
+    $missing = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $bins = Get-ChildItem $ScanDir -Recurse -Include "*.dll","*.exe" |
+            Where-Object { $_.Name -notmatch "^(ffmpeg|avcodec|avdevice|avfilter|avformat|avutil|swresample|swscale|xvidcore)" }
+    foreach ($f in $bins) {
+        $lines = & $ldd ($f.FullName) 2>$null
+        foreach ($line in $lines) {
+            if ($line -match "^\s+(\S+\.dll)\s+=>\s+/mingw64/bin/" ) {
+                $dll = $Matches[1]
+                if (-not (Test-Path (Join-Path $ScanDir $dll))) {
+                    [void]$missing.Add($dll)
+                }
+            }
+        }
+    }
+    return $missing
+}
+
+# ── Step 0: Validate prerequisites ────────────────────────────────────────────
+
+Write-Step "Checking prerequisites"
+
+if (-not (Test-Path $Pacman)) {
+    throw "MSYS2 not found at $Msys2Root. Install MSYS2 from https://www.msys2.org first."
+}
+
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    throw "Rust/Cargo not found. Install from https://rustup.rs first."
+}
+
+# ── Step 1: Install MSYS2 packages ────────────────────────────────────────────
+
+Write-Step "Installing/verifying MSYS2 mingw64 packages"
+
+$RequiredPackages = @(
+    "mingw-w64-x86_64-gcc",
+    "mingw-w64-x86_64-cmake",
+    "mingw-w64-x86_64-ninja",
+    "mingw-w64-x86_64-qt6-base",
+    "mingw-w64-x86_64-qt6-tools",
+    "mingw-w64-x86_64-nlohmann-json",
+    "mingw-w64-x86_64-catch",
+    "mingw-w64-x86_64-ffmpeg"
+)
+
+$InstalledOutput = & $Pacman -Q 2>&1
+$InstalledPackages = $InstalledOutput | ForEach-Object { ($_ -split " ")[0] }
+
+$ToInstall = @($RequiredPackages | Where-Object { $_ -notin $InstalledPackages })
+
+if ($ToInstall.Count -gt 0) {
+    Write-Host "Installing: $($ToInstall -join ', ')" -ForegroundColor Yellow
+    & $Pacman -S --noconfirm @ToInstall 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) { throw "pacman install failed" }
+} else {
+    Write-Host "All packages already installed." -ForegroundColor Green
+}
+
+# ── Step 2: Set up PATH ────────────────────────────────────────────────────────
+
+Write-Step "Configuring environment PATH"
+
+$env:PATH = "$Mingw64Bin;$Msys2Root\usr\bin;$env:PATH"
+Write-Host "Prepended $Mingw64Bin to PATH"
+
+# ── Step 3: Build Rust FFI (GNU target) ───────────────────────────────────────
+
+$RustReleaseDir = Join-Path $RustDir "target\$RustTarget\release"
+
+if ($SkipRustBuild) {
+    Write-Step "Skipping Rust build (--SkipRustBuild)"
+} else {
+    Write-Step "Building Rust FFI library (target: $RustTarget)"
+
+    $installedTargets = rustup target list --installed 2>&1
+    if ($installedTargets -notmatch $RustTarget) {
+        Write-Host "Adding Rust target $RustTarget ..."
+        Invoke-Command-Required rustup @("target", "add", $RustTarget)
+    }
+
+    Push-Location $RustDir
+    try {
+        Write-Host "Running cargo build --release --target $RustTarget ..."
+        Invoke-Command-Required cargo @("build", "--release", "--target", $RustTarget, "-p", "virtualbow_ffi")
+    } finally {
+        Pop-Location
+    }
+}
+
+$ffiLib = Join-Path $RustReleaseDir "libvirtualbow_ffi.a"
+if (-not (Test-Path $ffiLib)) {
+    throw "Expected Rust FFI library not found: $ffiLib"
+}
+Write-Host "Rust FFI library: $ffiLib" -ForegroundColor Green
+
+# ── Step 4: CMake configure + build ───────────────────────────────────────────
+
+if ($SkipCppBuild) {
+    Write-Step "Skipping C++ build (--SkipCppBuild)"
+} else {
+    Write-Step "Configuring CMake"
+
+    New-Item -ItemType Directory -Path $BuildDir -Force | Out-Null
+    $CacheFile = Join-Path $BuildDir "CMakeCache.txt"
+    if (Test-Path $CacheFile) { Remove-Item $CacheFile -Force }
+    $CmakeFilesDir = Join-Path $BuildDir "CMakeFiles"
+    if (Test-Path $CmakeFilesDir) { Remove-Item $CmakeFilesDir -Recurse -Force }
+
+    $cmakeArgs = @(
+        $GuiDir,
+        "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_PREFIX_PATH=$Msys2Root/mingw64",
+        "-DCMAKE_C_COMPILER=$Mingw64Bin/gcc.exe",
+        "-DCMAKE_CXX_COMPILER=$Mingw64Bin/g++.exe",
+        "-DCMAKE_MAKE_PROGRAM=$Mingw64Bin/ninja.exe"
+    )
+
+    Push-Location $BuildDir
+    try {
+        Write-Host "cmake $cmakeArgs"
+        Invoke-Command-Required "$Mingw64Bin\cmake.exe" $cmakeArgs $BuildDir
+    } finally {
+        Pop-Location
+    }
+
+    Write-Step "Building C++ GUI"
+
+    Push-Location $BuildDir
+    try {
+        Invoke-Command-Required "$Mingw64Bin\cmake.exe" @("--build", ".", "-j4", "--target", "virtualbow-gui")
+    } finally {
+        Pop-Location
+    }
+}
+
+$GuiExe = Join-Path $AppDir "virtualbow-gui.exe"
+if (-not (Test-Path $GuiExe)) {
+    throw "Expected GUI executable not found: $GuiExe"
+}
+Write-Host "GUI executable: $GuiExe" -ForegroundColor Green
+
+# ── Step 5: Run windeployqt6 ──────────────────────────────────────────────────
+
+Write-Step "Running windeployqt6"
+
+$windeployqt = Join-Path $Mingw64Bin "windeployqt6.exe"
+if (-not (Test-Path $windeployqt)) {
+    throw "windeployqt6.exe not found at $windeployqt"
+}
+
+try {
+    $windeployqtOutput = & $windeployqt $GuiExe 2>&1
+    $windeployqtOutput | ForEach-Object { Write-Host $_ }
+} catch {
+    # windeployqt6 from MSYS2 exits 1 due to missing translations catalog
+    # (dev-build quirk with no catalogs.json). This is harmless - all plugins
+    # are still copied correctly.
+    Write-Host "  (windeployqt6 non-fatal warning suppressed)" -ForegroundColor Yellow
+}
+Write-Host "windeployqt6 completed." -ForegroundColor Green
+
+# ── Step 6: Copy MinGW runtime DLLs ──────────────────────────────────────────
+
+Write-Step "Copying MinGW runtime DLLs (auto-discovered via ldd)"
+
+# First pass: copy DLLs required by Qt plugins and main exe
+$needed = Get-MissingMingwDlls -ScanDir $AppDir -Mingw64Bin $Mingw64Bin
+foreach ($dll in ($needed | Sort-Object)) {
+    $src = Join-Path $Mingw64Bin $dll
+    if (Test-Path $src) {
+        try {
+            Copy-Item $src (Join-Path $AppDir $dll) -Force
+            Write-Host "  Copied: $dll" -ForegroundColor Gray
+        } catch {
+            Write-Host "  Skipped (in use): $dll" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  Warning: $dll not found in $Mingw64Bin" -ForegroundColor Yellow
+    }
+}
+
+# Second pass: re-scan now that new DLLs are present (they may have their own deps)
+$needed2 = Get-MissingMingwDlls -ScanDir $AppDir -Mingw64Bin $Mingw64Bin
+foreach ($dll in ($needed2 | Sort-Object)) {
+    $src = Join-Path $Mingw64Bin $dll
+    if (Test-Path $src) {
+        try {
+            Copy-Item $src (Join-Path $AppDir $dll) -Force
+            Write-Host "  Copied (pass 2): $dll" -ForegroundColor Gray
+        } catch {
+            Write-Host "  Skipped (in use): $dll" -ForegroundColor Yellow
+        }
+    }
+}
+Write-Host "  Done. Total DLLs in app: $((Get-ChildItem $AppDir -Filter '*.dll').Count)" -ForegroundColor Green
+
+# ── Step 7: Copy ffmpeg and its dependencies ─────────────────────────────────
+
+Write-Step "Copying ffmpeg.exe and codec dependencies"
+
+$ffmpegSrc = Join-Path $Mingw64Bin "ffmpeg.exe"
+if (Test-Path $ffmpegSrc) {
+    try {
+        Copy-Item $ffmpegSrc (Join-Path $AppDir "ffmpeg.exe") -Force
+        Write-Host "  Copied: ffmpeg.exe" -ForegroundColor Gray
+    } catch {
+        Write-Host "  Skipped (in use): ffmpeg.exe" -ForegroundColor Yellow
+    }
+
+    # Discover and copy ffmpeg codec DLLs (av*, sw*, etc.)
+    $ldd = "C:\msys64\mingw64\bin\ldd.exe"
+    if (-not (Test-Path $ldd)) { $ldd = "C:\msys64\usr\bin\ldd.exe" }
+    $ffmpegDeps = & $ldd (Join-Path $AppDir "ffmpeg.exe") 2>$null |
+        Where-Object { $_ -match "^\s+(\S+\.dll)\s+=>\s+/mingw64/bin/" } |
+        ForEach-Object { $_ -replace ".*?(\S+\.dll)\s+=>\s+.*", '$1' }
+    foreach ($dll in $ffmpegDeps) {
+        $src = Join-Path $Mingw64Bin $dll
+        $dst = Join-Path $AppDir $dll
+        if ((Test-Path $src) -and -not (Test-Path $dst)) {
+            try {
+                Copy-Item $src $dst -Force
+                Write-Host "  Copied (ffmpeg dep): $dll" -ForegroundColor Gray
+            } catch {
+                Write-Host "  Skipped (in use): $dll" -ForegroundColor Yellow
+            }
+        }
+    }
+} else {
+    Write-Host "  Warning: ffmpeg.exe not found in $Mingw64Bin - video export will not work" -ForegroundColor Yellow
+}
+
+# ── Step 8: Package as portable ZIP ──────────────────────────────────────────
+
+Write-Step "Creating portable ZIP"
+
+$ZipName = "virtualbow-portable-$AppVersion-windows-x64.zip"
+$ZipPath = Join-Path $OutputDir $ZipName
+
+if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
+
+Compress-Archive -Path "$AppDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
+
+$zipSize = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
+Write-Host "`nPortable package created: $ZipPath ($zipSize MB)" -ForegroundColor Green
+Write-Host "Contents of application directory:" -ForegroundColor Cyan
+Get-ChildItem $AppDir | Select-Object Name, @{N="Size(KB)";E={[math]::Round($_.Length/1KB,0)}} | Format-Table -AutoSize

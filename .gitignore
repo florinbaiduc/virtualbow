@@ -1,0 +1,14 @@
+# Qt creator
+*.user
+build
+
+# VS Code
+.vscode
+
+# Visual Studio
+CMakeSettings.json
+.vs/
+out/
+
+# MacOS
+.DS_Store
