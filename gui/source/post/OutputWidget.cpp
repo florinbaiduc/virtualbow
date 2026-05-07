@@ -334,6 +334,7 @@ DynamicOutputWidget::DynamicOutputWidget(const BowResult& data)
     numbers->addValue("String force (strand)", new DoubleOutput(std::get<0>(data.dynamics->max_forces.max_strand_force), Quantities::force, 2, Tooltips::OutputMaxStrandForce));
 
     auto plot_shapes = new ShapePlot(data.common, data.dynamics->states, 0);
+    plot_shapes->setTimerVisible(true);
     auto plot_arrow = new ArrowPlot(data.common, data.dynamics->states);
     auto plot_stress = new StressPlot(data.common, data.dynamics->states);
     auto plot_curvature = new CurvaturePlot(data.common, data.dynamics->states);
@@ -398,6 +399,18 @@ DynamicOutputWidget::DynamicOutputWidget(const BowResult& data)
     QObject::connect(slider, &Slider::indexChanged, plot_stress, &StressPlot::setStateIndex);
     QObject::connect(slider, &Slider::indexChanged, plot_curvature, &CurvaturePlot::setStateIndex);
     QObject::connect(slider, &Slider::indexChanged, plot_energy, &EnergyPlot::setStateIndex);
+    // Update the elapsed-time overlay on the dynamic Shape plot. The dynamic
+    // simulation timeline is conventionally zero at release, so we display
+    // states.time[i] - states.time[0] (defensive against any non-zero start).
+    {
+        const auto& dyn_time = data.dynamics->states.time;
+        const double t0 = dyn_time.empty() ? 0.0 : dyn_time.front();
+        QObject::connect(slider, &Slider::indexChanged, plot_shapes, [plot_shapes, &dyn_time, t0](int i) {
+            if(i >= 0 && static_cast<size_t>(i) < dyn_time.size()) {
+                plot_shapes->setTimerSeconds(dyn_time[i] - t0);
+            }
+        });
+    }
     emit slider->indexChanged(0);
 
     // Wire the "Save as video..." button (created above next to the Shape

@@ -60,6 +60,24 @@ ShapePlot::ShapePlot(const Common& common, const States& states, int background_
     arrow->setLineStyle(QCPCurve::lsNone);
     arrow->setScatterStyle({QCPScatterStyle::ssCrossCircle, Qt::red, 10});
 
+    // Elapsed-time overlay anchored to the plot's top-left corner. Hidden
+    // by default; callers turn it on for dynamic-phase plots and videos.
+    timer_label = new QCPItemText(this);
+    timer_label->setPositionAlignment(Qt::AlignTop | Qt::AlignLeft);
+    timer_label->position->setType(QCPItemPosition::ptAxisRectRatio);
+    timer_label->position->setCoords(0.01, 0.01);
+    timer_label->setTextAlignment(Qt::AlignLeft);
+    timer_label->setPadding(QMargins(6, 3, 6, 3));
+    timer_label->setBrush(QBrush(QColor(255, 255, 255, 200)));   // semi-transparent backdrop for readability
+    timer_label->setPen(QPen(QColor(120, 120, 120)));
+    QFont tf = this->font();
+    tf.setStyleHint(QFont::Monospace);
+    tf.setFamily("monospace");
+    tf.setBold(true);
+    timer_label->setFont(tf);
+    timer_label->setText("0:000 ms:\xC2\xB5s");   // µ in UTF-8
+    timer_label->setVisible(false);
+
     QObject::connect(&quantity, &Quantity::unitChanged, this, &ShapePlot::updatePlot);
     updatePlot();
 }
@@ -67,6 +85,25 @@ ShapePlot::ShapePlot(const Common& common, const States& states, int background_
 void ShapePlot::setStateIndex(int i) {
     index = i;
     updateCurrentState();
+    this->replot();
+}
+
+void ShapePlot::setTimerVisible(bool visible) {
+    if(timer_label) {
+        timer_label->setVisible(visible);
+        this->replot();
+    }
+}
+
+void ShapePlot::setTimerSeconds(double seconds) {
+    if(!timer_label) return;
+    if(seconds < 0.0) seconds = 0.0;
+    long long us_total = static_cast<long long>(std::llround(seconds * 1.0e6));
+    long long ms = us_total / 1000;
+    long long us = us_total % 1000;
+    timer_label->setText(QString("%1:%2 ms:\xC2\xB5s")
+        .arg(ms)
+        .arg(us, 3, 10, QChar('0')));
     this->replot();
 }
 

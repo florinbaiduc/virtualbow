@@ -350,18 +350,28 @@ bool ShapeVideoExporter::run() {
     int frame_idx = 0;
     QPixmap cached;
     int cached_state = -1;
-    auto write_frame = [&](int combined_state_idx) -> bool {
+    // Phase 3 only: timer text changes per frame, so the cache key must
+    // include the displayed time in addition to the state index.
+    double cached_timer_s = -1.0;
+    auto write_frame = [&](int combined_state_idx, double timer_seconds = -1.0) -> bool {
         progress.setValue(frame_idx);
         QApplication::processEvents();
         if(progress.wasCanceled()) {
             return false;
         }
 
-        if(combined_state_idx != cached_state) {
+        const bool need_replot =
+            (combined_state_idx != cached_state) ||
+            (timer_seconds >= 0.0 && timer_seconds != cached_timer_s);
+        if(need_replot) {
             video_plot->setStateIndex(combined_state_idx);
+            if(timer_seconds >= 0.0) {
+                video_plot->setTimerSeconds(timer_seconds);
+            }
             video_plot->replot(QCustomPlot::rpImmediateRefresh);
             cached = video_plot->toPixmap(frame_size.width(), frame_size.height());
             cached_state = combined_state_idx;
+            cached_timer_s = timer_seconds;
         }
         QString frame_path = tmp.filePath(QString("frame_%1.png").arg(frame_idx, 6, 10, QChar('0')));
         if(!cached.save(frame_path, "PNG")) {
@@ -374,6 +384,10 @@ bool ShapeVideoExporter::run() {
     };
 
     // Phase 1: static (pulling) frames, stretched to `static_seconds`.
+    //
+    // The elapsed-time overlay is hidden during the pulling and hold phases;
+    // it becomes visible at the moment of release (start of phase 3).
+    video_plot->setTimerVisible(false);
     //
     // Important: the static and dynamic simulations each capture their own
     // "bow at full draw" state. combined_states[n_static - 1] (final static)
@@ -416,8 +430,10 @@ bool ShapeVideoExporter::run() {
     // For each output frame, find the nearest simulation state by timestamp.
     // The first frame maps to dynamic_offset (same as the hold frame above)
     // so there is no transition pop.
+    video_plot->setTimerVisible(true);
+    const double dyn_t0 = dyn_time.front();
     for(int i = 0; i < n_dynamic_frames; ++i) {
-        const double target_t = dyn_time.front()
+        const double target_t = dyn_t0
             + static_cast<double>(i) * dynamic_duration / (n_dynamic_frames - 1);
         auto it = std::lower_bound(dyn_time.begin(), dyn_time.end(), target_t);
         int dyn_idx;
@@ -431,7 +447,7 @@ bool ShapeVideoExporter::run() {
                 ? static_cast<int>(prev - dyn_time.begin())
                 : static_cast<int>(it  - dyn_time.begin());
         }
-        if(!write_frame(dynamic_offset + dyn_idx)) return false;
+        if(!write_frame(dynamic_offset + dyn_idx, target_t - dyn_t0)) return false;
     }
     progress.setValue(total_frames);
 

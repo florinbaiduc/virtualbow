@@ -9,6 +9,12 @@ public:
     ShapePlot(const Common& common, const States& states, int background_states);
     void setStateIndex(int i);
 
+    // Timer overlay (top-left of the plot). Shows elapsed time formatted as
+    // "<ms>:<µs> ms:µs" with the microsecond field zero-padded to 3 digits.
+    // The caller controls the time origin: pass 0 at the moment of release.
+    void setTimerVisible(bool visible);
+    void setTimerSeconds(double seconds);
+
 private:
     const Common& common;
     const States& states;
@@ -23,6 +29,7 @@ private:
     QList<QCPCurve*> handle_curves;     // Black line bridging the inboard limb tips, one per state
     QCPCurve* pivot;    // Todo: Replace with other QCustomPlot object?
     QCPCurve* arrow;    // Todo: Replace with other QCustomPlot object?
+    QCPItemText* timer_label = nullptr;     // Elapsed-time overlay; hidden by default.
 
     void updatePlot();
 
