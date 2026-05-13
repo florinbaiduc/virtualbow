@@ -93,7 +93,15 @@ TreeDock::TreeDock(MainModel* mainModel)
     QObject::connect(model, &MainTreeModel::contentModified, this, &TreeDock::updateActions);
     QObject::connect(selectionModel, &QItemSelectionModel::selectionChanged, this, &TreeDock::updateActions);
 
+    // Hide / show the lower-limb top-level rows based on the symmetry flags.
+    // Re-applied whenever a flag changes and after every model reset (file
+    // load, new file, …) — the underlying QTreeView resets row hidden state
+    // on modelReset.
+    QObject::connect(model, &MainTreeModel::symmetryChanged, this, &TreeDock::updateSymmetryVisibility);
+    QObject::connect(model, &MainTreeModel::modelReset,      this, &TreeDock::updateSymmetryVisibility);
+
     updateActions();
+    updateSymmetryVisibility();
 }
 
 QMenu* TreeDock::createMaterialMenu() {
@@ -201,4 +209,14 @@ void TreeDock::updateActions() {
     tree->addAction(actionRename);
     tree->addAction(sep2);
     tree->addAction(actionRemove);
+}
+
+void TreeDock::updateSymmetryVisibility() {
+    // Hide the lower-limb top-level rows whose corresponding symmetry flag is
+    // checked. The upper-limb rows then represent both halves of the bow and
+    // their display name drops the "(upper)" suffix (see MainTreeModel::topLevelItemName).
+    QModelIndex root = QModelIndex();
+    tree->setRowHidden(TopLevelItem::LAYERS_LOWER,  root, model->isSymmetric(TopLevelItem::LAYERS_LOWER));
+    tree->setRowHidden(TopLevelItem::PROFILE_LOWER, root, model->isSymmetric(TopLevelItem::PROFILE_LOWER));
+    tree->setRowHidden(TopLevelItem::WIDTH_LOWER,   root, model->isSymmetric(TopLevelItem::WIDTH_LOWER));
 }

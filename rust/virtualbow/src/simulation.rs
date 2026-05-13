@@ -1171,7 +1171,7 @@ mod tests {
     use crate::input::{
         ArrowMass, BowModel, BowString, Damping, Draw, DrawLength, Handle, Height, Layer,
         LayerAlignment, LimbSection, Line, Masses, Material, Profile, ProfileSegment, RigidHandle,
-        Section, Settings, Width,
+        Section, Settings, Symmetry, Width,
     };
 
     /// Build a yumi-style asymmetric bow programmatically and simulate it.
@@ -1246,6 +1246,7 @@ mod tests {
                 damping_ratio_limbs: 0.05,
                 damping_ratio_string: 0.05,
             },
+            symmetry: Symmetry::default(),
         }
     }
 

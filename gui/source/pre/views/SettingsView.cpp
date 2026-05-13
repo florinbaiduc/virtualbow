@@ -5,9 +5,35 @@
 #include "pre/utils/DoubleRange.hpp"
 #include "pre/models/units/UnitSystem.hpp"
 #include "pre/models/SettingsModel.hpp"
+#include "pre/models/MainTreeModel.hpp"
 #include "pre/Language.hpp"
+#include <QCheckBox>
 
-SettingsView::SettingsView(SettingsModel* model) {
+namespace {
+    // Build a checkbox whose state is bound to the given lower-limb top-level
+    // row's symmetry flag. Toggling the box flips the flag via MainTreeModel,
+    // which in turn hides / unhides the row, syncs upper → lower data, and
+    // emits the necessary change signals.
+    QCheckBox* makeSymmetryCheckBox(MainTreeModel* tree, int row, const QString& tooltip) {
+        auto box = new QCheckBox();
+        box->setChecked(tree->isSymmetric(row));
+        box->setToolTip(tooltip);
+        QObject::connect(box, &QCheckBox::toggled, tree, [tree, row](bool checked) {
+            tree->setSymmetric(row, checked);
+        });
+        return box;
+    }
+}
+
+SettingsView::SettingsView(SettingsModel* model, MainTreeModel* tree) {
+    addHeading("Symmetry");
+    addProperty("Profile", makeSymmetryCheckBox(tree, TopLevelItem::PROFILE_LOWER,
+        "Mirror the upper-limb profile onto the lower limb. When checked, the lower-limb profile is hidden and kept in sync with the upper-limb profile."));
+    addProperty("Width", makeSymmetryCheckBox(tree, TopLevelItem::WIDTH_LOWER,
+        "Mirror the upper-limb width onto the lower limb. When checked, the lower-limb width is hidden and kept in sync with the upper-limb width."));
+    addProperty("Layers", makeSymmetryCheckBox(tree, TopLevelItem::LAYERS_LOWER,
+        "Mirror the upper-limb layers onto the lower limb. When checked, the lower-limb layers are hidden and kept in sync with the upper-limb layers."));
+
     addHeading("General");
     addProperty("Limb elements", new IntegerView(model, model->N_LIMB_ELEMENTS, IntegerRange::positive(), Tooltips::SettingsNumLimbElements));
     addProperty("Limb eval points", new IntegerView(model, model->N_EVAL_POINTS, IntegerRange::greaterOrEqual(2), Tooltips::SettingsNumEvalPoints));

@@ -74,6 +74,12 @@ BowModel BowModel::example() {
             .damping_ratio_limbs = 0.05,
             .damping_ratio_string = 0.05
         },
+        // Default example bow is symmetric — both limbs share profile, width and layers.
+        .symmetry = Symmetry {
+            .profile = true,
+            .width = true,
+            .layers = true
+        },
     };
 }
 
@@ -137,6 +143,27 @@ std::string BowModel::generateLayerName() const {
 
         index += 1;
     }
+}
+
+bool BowModel::syncSymmetric() {
+    // Unconditionally copy upper → lower for each property flagged symmetric.
+    // We don't compare first because most of the contained types (Profile,
+    // Width, Layer, …) don't define operator==. Callers that care about a
+    // "did anything change" signal already debounce or compare elsewhere.
+    bool changed = false;
+    if(symmetry.profile) {
+        profile.lower = profile.upper;
+        changed = true;
+    }
+    if(symmetry.width) {
+        section.lower.width = section.upper.width;
+        changed = true;
+    }
+    if(symmetry.layers) {
+        section.lower.layers = section.upper.layers;
+        changed = true;
+    }
+    return changed;
 }
 
 void to_json(nlohmann::json& obj, const Handle& input) {
@@ -324,4 +351,48 @@ void from_json(const nlohmann::json& obj, ArrowMass& output) {
     else {
         throw std::runtime_error("Unknown alignment type");
     }
+}
+
+void to_json(nlohmann::json& obj, const Symmetry& input) {
+    obj["profile"] = input.profile;
+    obj["width"]   = input.width;
+    obj["layers"]  = input.layers;
+}
+
+void from_json(const nlohmann::json& obj, Symmetry& output) {
+    // Tolerate missing keys for backward compatibility with v5 files that
+    // pre-date the symmetry feature.
+    output = Symmetry{};
+    if(obj.contains("profile")) obj.at("profile").get_to(output.profile);
+    if(obj.contains("width"))   obj.at("width").get_to(output.width);
+    if(obj.contains("layers"))  obj.at("layers").get_to(output.layers);
+}
+
+void to_json(nlohmann::json& obj, const BowModel& input) {
+    obj["comment"]  = input.comment;
+    obj["settings"] = input.settings;
+    obj["handle"]   = input.handle;
+    obj["draw"]     = input.draw;
+    obj["profile"]  = input.profile;
+    obj["section"]  = input.section;
+    obj["string"]   = input.string;
+    obj["masses"]   = input.masses;
+    obj["damping"]  = input.damping;
+    obj["symmetry"] = input.symmetry;
+}
+
+void from_json(const nlohmann::json& obj, BowModel& output) {
+    obj.at("comment").get_to(output.comment);
+    obj.at("settings").get_to(output.settings);
+    obj.at("handle").get_to(output.handle);
+    obj.at("draw").get_to(output.draw);
+    obj.at("profile").get_to(output.profile);
+    obj.at("section").get_to(output.section);
+    obj.at("string").get_to(output.string);
+    obj.at("masses").get_to(output.masses);
+    obj.at("damping").get_to(output.damping);
+    // `symmetry` is optional for backwards compatibility with v5 files that
+    // pre-date the symmetry feature; defaults to all-false (asymmetric).
+    if(obj.contains("symmetry")) obj.at("symmetry").get_to(output.symmetry);
+    else                          output.symmetry = Symmetry{};
 }

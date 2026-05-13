@@ -33,7 +33,8 @@ impl Args {
     // Performs the desired simulation according to the command line arguments
     // and save the results to the specified output path
     fn execute(&self) -> Result<(), ModelError> {
-        let model = BowModel::load(&self.input)?;
+        let mut model = BowModel::load(&self.input)?;
+        model.apply_symmetry();
 
         // Non-fatal continuity checks at the upper/lower limb joint.
         // Surfaces silent geometric/material mismatches between the two

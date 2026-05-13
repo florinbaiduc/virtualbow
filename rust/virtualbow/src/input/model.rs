@@ -17,7 +17,7 @@ impl BowModel {
     }
 
     pub fn validate(&self) -> Result<(), ModelError> {
-        let Self { comment: _, settings, handle, draw, section, profile, string, masses, damping } = self;
+        let Self { comment: _, settings, handle, draw, section, profile, string, masses, damping, symmetry: _ } = self;
 
         settings.validate()?;
         handle.validate()?;
@@ -29,6 +29,22 @@ impl BowModel {
         damping.validate()?;
 
         Ok(())
+    }
+
+    /// Mirror upper-limb data into the lower-limb counterpart for each
+    /// property marked symmetric. Called by the FFI entry points just before
+    /// validation/simulation so the simulation sees a self-consistent model
+    /// even when the on-disk file's lower fields are stale or hand-edited.
+    pub fn apply_symmetry(&mut self) {
+        if self.symmetry.profile {
+            self.profile.lower = self.profile.upper.clone();
+        }
+        if self.symmetry.width {
+            self.section.lower.width = self.section.upper.width.clone();
+        }
+        if self.symmetry.layers {
+            self.section.lower.layers = self.section.upper.layers.clone();
+        }
     }
 
     /// Non-fatal continuity checks at the upper/lower limb joint.
@@ -152,6 +168,8 @@ impl BowModel {
                 damping_ratio_limbs: 0.05,
                 damping_ratio_string: 0.05,
             },
+            // The default example is a fully symmetric bow.
+            symmetry: Symmetry { profile: true, width: true, layers: true },
         }
     }
 }

@@ -68,7 +68,8 @@ pub fn save_result<P>(data: &[u8], path: P) -> Result<(), String>
 }
 
 pub fn compute_geometry(data: &[u8]) -> Result<Vec<u8>, String> {
-    let model = BowModel::try_from(data).map_err(|e| e.to_string())?;
+    let mut model = BowModel::try_from(data).map_err(|e| e.to_string())?;
+    model.apply_symmetry();
     model.validate().map_err(|e| e.to_string())?;
 
     let geometry = BowGeometry::new(&model).map_err(|e| e.to_string())?;
@@ -82,7 +83,8 @@ pub fn compute_geometry(data: &[u8]) -> Result<Vec<u8>, String> {
 pub fn simulate_model<F>(data: &[u8], mode: SimulationMode, callback: F) -> Result<Vec<u8>, String>
     where F: Fn(SimulationMode, f64) -> bool
 {
-    let model = BowModel::try_from(data).map_err(|e| e.to_string())?;
+    let mut model = BowModel::try_from(data).map_err(|e| e.to_string())?;
+    model.apply_symmetry();
     let result = Simulation::simulate(&model, mode, callback).map_err(|e| e.to_string())?;
     let data = result.try_into().map_err(|e: ModelError| e.to_string())?;
 

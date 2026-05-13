@@ -29,6 +29,25 @@ pub struct BowModel {
     pub string: BowString,
     pub masses: Masses,
     pub damping: Damping,
+    /// Per-property flags marking the lower limb's `profile`, `section.width`
+    /// and `section.layers` as symmetric mirrors of the upper-limb counterpart.
+    /// The simulation honours these by copying upper → lower before
+    /// validation (see `BowModel::apply_symmetry`). Defaults to all-false on
+    /// load so that pre-existing v5 files (which always carry independent
+    /// upper/lower halves) keep working unchanged.
+    #[serde(default)]
+    pub symmetry: Symmetry,
+}
+
+/// Mirror flags for asymmetric/symmetric bow editing. See `BowModel`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Symmetry {
+    #[serde(default)]
+    pub profile: bool,
+    #[serde(default)]
+    pub width: bool,
+    #[serde(default)]
+    pub layers: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -398,6 +417,9 @@ impl From<version4::BowModel> for BowModel {
             string: model.string,
             masses,
             damping: model.damping,
+            // v4 bows had no upper/lower split, so the migrated v5 model is
+            // symmetric across the board.
+            symmetry: Symmetry { profile: true, width: true, layers: true },
         }
     }
 }

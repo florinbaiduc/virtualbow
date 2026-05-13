@@ -51,6 +51,101 @@ LimbSide MainTreeModel::sideForTopLevel(int row) {
     }
 }
 
+bool MainTreeModel::isSymmetryToggleRow(int row) {
+    return row == TopLevelItem::LAYERS_LOWER
+        || row == TopLevelItem::PROFILE_LOWER
+        || row == TopLevelItem::WIDTH_LOWER;
+}
+
+bool MainTreeModel::isSymmetric(int topLevelRow) const {
+    if(bow == nullptr) return false;
+    switch(topLevelRow) {
+        case TopLevelItem::LAYERS_LOWER:  return bow->symmetry.layers;
+        case TopLevelItem::PROFILE_LOWER: return bow->symmetry.profile;
+        case TopLevelItem::WIDTH_LOWER:   return bow->symmetry.width;
+        default: return false;
+    }
+}
+
+void MainTreeModel::setSymmetric(int topLevelRow, bool checked) {
+    if(bow == nullptr || !isSymmetryToggleRow(topLevelRow)) return;
+    if(isSymmetric(topLevelRow) == checked) return;
+
+    QModelIndex topLevelIndex = createIndex(topLevelRow, 0, ItemType::TOPLEVEL);
+
+    // For LAYERS_LOWER / PROFILE_LOWER we need to insert/remove child rows so
+    // the child count matches the upper limb's. WIDTH_LOWER has no children.
+    bool hasChildren = (topLevelRow == TopLevelItem::LAYERS_LOWER
+                     || topLevelRow == TopLevelItem::PROFILE_LOWER);
+
+    int oldRowCount = hasChildren ? rowCount(topLevelIndex) : 0;
+    if(hasChildren && oldRowCount > 0) {
+        beginRemoveRows(topLevelIndex, 0, oldRowCount - 1);
+        if(topLevelRow == TopLevelItem::LAYERS_LOWER) {
+            bow->section.lower.layers.clear();
+        } else {
+            bow->profile.lower.clear();
+        }
+        endRemoveRows();
+    }
+
+    switch(topLevelRow) {
+        case TopLevelItem::LAYERS_LOWER:  bow->symmetry.layers = checked; break;
+        case TopLevelItem::PROFILE_LOWER: bow->symmetry.profile = checked; break;
+        case TopLevelItem::WIDTH_LOWER:   bow->symmetry.width = checked; break;
+    }
+
+    // Mirror upper → lower regardless of direction: when newly checked the
+    // lower data becomes a fresh copy of upper; when newly unchecked we still
+    // seed the (now-editable) lower data with the upper values as a sane
+    // starting point. The user can then diverge from there.
+    bow->syncSymmetric();
+    if(!checked) {
+        // syncSymmetric is a no-op for flags that are now false; explicitly
+        // seed the lower side from the upper data so the user inherits the
+        // current symmetric state as a starting point for asymmetric edits.
+        switch(topLevelRow) {
+            case TopLevelItem::LAYERS_LOWER:  bow->section.lower.layers = bow->section.upper.layers; break;
+            case TopLevelItem::PROFILE_LOWER: bow->profile.lower        = bow->profile.upper;        break;
+            case TopLevelItem::WIDTH_LOWER:   bow->section.lower.width  = bow->section.upper.width;  break;
+        }
+    }
+
+    if(hasChildren) {
+        int newRowCount = (topLevelRow == TopLevelItem::LAYERS_LOWER)
+            ? (int)bow->section.lower.layers.size()
+            : (int)bow->profile.lower.size();
+        if(newRowCount > 0) {
+            beginInsertRows(topLevelIndex, 0, newRowCount - 1);
+            endInsertRows();
+        }
+    }
+
+    // Notify views that the top-level item itself and its descendants changed
+    // (CheckState, enabled/disabled flags, tooltip, …).
+    emit dataChanged(topLevelIndex, topLevelIndex);
+
+    // The matching upper row's display name flips between "Layers (upper)"
+    // and "Layers" depending on the symmetry flag — refresh it.
+    int upperRow;
+    switch(topLevelRow) {
+        case TopLevelItem::LAYERS_LOWER:  upperRow = TopLevelItem::LAYERS_UPPER;  break;
+        case TopLevelItem::PROFILE_LOWER: upperRow = TopLevelItem::PROFILE_UPPER; break;
+        case TopLevelItem::WIDTH_LOWER:   upperRow = TopLevelItem::WIDTH_UPPER;   break;
+        default: upperRow = -1;
+    }
+    if(upperRow >= 0) {
+        QModelIndex upperIndex = createIndex(upperRow, 0, ItemType::TOPLEVEL);
+        emit dataChanged(upperIndex, upperIndex);
+    }
+
+    // Let the tree dock hide / unhide the lower row.
+    emit symmetryChanged();
+
+    // Treated as a content change for the unsaved-work / geometry-recompute logic.
+    emit contentModified();
+}
+
 LimbSection& MainTreeModel::sectionFor(LimbSide side) {
     return side == LimbSide::Upper ? bow->section.upper : bow->section.lower;
 }
@@ -129,10 +224,11 @@ void MainTreeModel::swapMaterials(int i, int j) {
 bool MainTreeModel::canInsertLayer(const QModelIndexList& indexes) {
     if(indexes.size() != 1) return false;
     int id = indexes[0].internalId();
-    if(id == ItemType::LAYER_UPPER || id == ItemType::LAYER_LOWER) return true;
-    if(id == ItemType::TOPLEVEL && (indexes[0].row() == TopLevelItem::LAYERS_UPPER ||
-                                    indexes[0].row() == TopLevelItem::LAYERS_LOWER)) {
-        return true;
+    if(id == ItemType::LAYER_UPPER) return true;
+    if(id == ItemType::LAYER_LOWER) return !isSymmetric(TopLevelItem::LAYERS_LOWER);
+    if(id == ItemType::TOPLEVEL && indexes[0].row() == TopLevelItem::LAYERS_UPPER) return true;
+    if(id == ItemType::TOPLEVEL && indexes[0].row() == TopLevelItem::LAYERS_LOWER) {
+        return !isSymmetric(TopLevelItem::LAYERS_LOWER);
     }
     return false;
 }
@@ -192,10 +288,11 @@ void MainTreeModel::swapLayers(LimbSide side, int i, int j) {
 bool MainTreeModel::canInsertSegment(const QModelIndexList& indexes) {
     if(indexes.size() != 1) return false;
     int id = indexes[0].internalId();
-    if(id == ItemType::SEGMENT_UPPER || id == ItemType::SEGMENT_LOWER) return true;
-    if(id == ItemType::TOPLEVEL && (indexes[0].row() == TopLevelItem::PROFILE_UPPER ||
-                                    indexes[0].row() == TopLevelItem::PROFILE_LOWER)) {
-        return true;
+    if(id == ItemType::SEGMENT_UPPER) return true;
+    if(id == ItemType::SEGMENT_LOWER) return !isSymmetric(TopLevelItem::PROFILE_LOWER);
+    if(id == ItemType::TOPLEVEL && indexes[0].row() == TopLevelItem::PROFILE_UPPER) return true;
+    if(id == ItemType::TOPLEVEL && indexes[0].row() == TopLevelItem::PROFILE_LOWER) {
+        return !isSymmetric(TopLevelItem::PROFILE_LOWER);
     }
     return false;
 }
@@ -370,6 +467,22 @@ int MainTreeModel::columnCount(const QModelIndex &parent) const {
 Qt::ItemFlags MainTreeModel::flags(const QModelIndex &index) const {
     Qt::ItemFlags flags = QAbstractItemModel::flags(index);
     int id = (int)index.internalId();
+
+    // Children of a symmetric lower sub-model are not editable / not enabled.
+    // The tree dock hides the corresponding top-level rows entirely (see
+    // TreeDock::updateSymmetryVisibility), but we keep this defensive guard
+    // so any code that resolves a stale QModelIndex against the model still
+    // gets sensible flags.
+    bool parentLocked = false;
+    if(id == ItemType::LAYER_LOWER)        parentLocked = isSymmetric(TopLevelItem::LAYERS_LOWER);
+    else if(id == ItemType::SEGMENT_LOWER) parentLocked = isSymmetric(TopLevelItem::PROFILE_LOWER);
+
+    if(parentLocked) {
+        flags &= ~Qt::ItemIsEnabled;
+        flags &= ~Qt::ItemIsSelectable;
+        return flags;
+    }
+
     if(id == ItemType::MATERIAL ||
        id == ItemType::LAYER_UPPER || id == ItemType::LAYER_LOWER) {
         flags |= Qt::ItemIsEditable;
@@ -469,17 +582,23 @@ bool MainTreeModel::setData(const QModelIndex &index, const QVariant &value, int
 }
 
 QString MainTreeModel::topLevelItemName(int row) const {
+    // When the matching symmetry flag is set, the lower-limb row is hidden by
+    // the tree dock and the upper-limb row stands in for both halves; drop
+    // the "(upper)" suffix in that case.
+    bool layersSym  = isSymmetric(TopLevelItem::LAYERS_LOWER);
+    bool profileSym = isSymmetric(TopLevelItem::PROFILE_LOWER);
+    bool widthSym   = isSymmetric(TopLevelItem::WIDTH_LOWER);
     switch(row) {
         case TopLevelItem::COMMENTS:      return "Comments";
         case TopLevelItem::SETTINGS:      return "Settings";
         case TopLevelItem::DRAW:          return "Draw";
         case TopLevelItem::HANDLE:        return "Handle";
         case TopLevelItem::MATERIALS:     return "Materials";
-        case TopLevelItem::LAYERS_UPPER:  return "Layers (upper)";
+        case TopLevelItem::LAYERS_UPPER:  return layersSym  ? "Layers"  : "Layers (upper)";
         case TopLevelItem::LAYERS_LOWER:  return "Layers (lower)";
-        case TopLevelItem::PROFILE_UPPER: return "Profile (upper)";
+        case TopLevelItem::PROFILE_UPPER: return profileSym ? "Profile" : "Profile (upper)";
         case TopLevelItem::PROFILE_LOWER: return "Profile (lower)";
-        case TopLevelItem::WIDTH_UPPER:   return "Width (upper)";
+        case TopLevelItem::WIDTH_UPPER:   return widthSym   ? "Width"   : "Width (upper)";
         case TopLevelItem::WIDTH_LOWER:   return "Width (lower)";
         case TopLevelItem::STRING:        return "String";
         case TopLevelItem::MASSES:        return "Masses";

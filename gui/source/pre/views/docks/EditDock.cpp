@@ -38,7 +38,7 @@ EditDock::EditDock(MainModel* viewModel)
 
         if(selection.size() == 1 && selection.first().internalId() == ItemType::TOPLEVEL && selection.first().row() == TopLevelItem::SETTINGS) {
             auto model = viewModel->getSettingsModel();
-            auto editor = new SettingsView(model);
+            auto editor = new SettingsView(model, viewModel->getMainTreeModel());
             showEditor(editor);
             return;
         }

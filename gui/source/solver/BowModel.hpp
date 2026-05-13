@@ -280,6 +280,24 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
     lower
 )
 
+// Per-property flags that mark a lower-limb sub-model as a mirror of the
+// corresponding upper-limb sub-model. When a flag is set, the GUI disables
+// editing of that lower-limb section and the lower data is kept in sync
+// with the upper data (see `BowModel::syncSymmetric`). Backwards compatible
+// with v5 files that pre-date this feature: missing fields default to false
+// (i.e. asymmetric, edit lower independently).
+struct Symmetry {
+    bool profile = false;
+    bool width = false;
+    bool layers = false;
+};
+
+// Custom (de)serializers used instead of NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE so
+// missing fields fall back to the in-struct defaults (the installed nlohmann
+// version doesn't yet expose `_WITH_DEFAULT`).
+void to_json(nlohmann::json& obj, const Symmetry& input);
+void from_json(const nlohmann::json& obj, Symmetry& output);
+
 struct BowModel {
     std::string comment;
     Settings settings;
@@ -290,6 +308,7 @@ struct BowModel {
     String string;
     Masses masses;
     Damping damping;
+    Symmetry symmetry;
 
     static BowModel example();
 
@@ -298,17 +317,13 @@ struct BowModel {
 
     bool isValidLayerName(const std::string& name) const;
     std::string generateLayerName() const;
+
+    // Copy upper-limb data into the lower-limb counterpart for each property
+    // that is marked symmetric. Returns true if anything was actually changed.
+    bool syncSymmetric();
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
-    BowModel,
-    comment,
-    settings,
-    handle,
-    draw,
-    profile,
-    section,
-    string,
-    masses,
-    damping
-)
+// Custom (de)serializers: BowModel needs to tolerate missing `symmetry` when
+// loading older v5 files.
+void to_json(nlohmann::json& obj, const BowModel& input);
+void from_json(const nlohmann::json& obj, BowModel& output);

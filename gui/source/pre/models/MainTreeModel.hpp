@@ -81,6 +81,19 @@ public:
     // Helper: which LimbSide does a top-level row belong to (for LAYERS_*/PROFILE_*/WIDTH_*)
     static LimbSide sideForTopLevel(int row);
 
+    // True if the given top-level row is one of the lower-limb sub-models
+    // that supports a "Symmetric to upper" checkbox (LAYERS_LOWER, PROFILE_LOWER, WIDTH_LOWER).
+    static bool isSymmetryToggleRow(int row);
+
+    // Returns whether the lower-limb sub-model addressed by `topLevelRow` is
+    // currently marked symmetric (false for any other row).
+    bool isSymmetric(int topLevelRow) const;
+
+    // Toggles the symmetry flag for the given lower-limb sub-model. When the
+    // flag transitions to `true` the corresponding lower data is mirrored from
+    // the upper limb and the tree's children are refreshed.
+    void setSymmetric(int topLevelRow, bool checked);
+
     // Resolve the BowModel's per-limb lists by side
     LimbSection& sectionFor(LimbSide side);
     std::list<Layer>& layersFor(LimbSide side) { return sectionFor(side).layers; }
@@ -105,6 +118,11 @@ public:
 signals:
     // Emitted when the tree structure of the bow model has been modified (including names)
     void contentModified();
+
+    // Emitted whenever any of the three symmetry flags has been toggled. The
+    // tree dock listens to this to hide / unhide the corresponding lower-limb
+    // top-level rows.
+    void symmetryChanged();
 
 private:
     BowModel* bow;

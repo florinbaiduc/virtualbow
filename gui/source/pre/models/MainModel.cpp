@@ -325,6 +325,11 @@ void MainModel::loadFile(const QString& path) {
 void MainModel::saveFile(const QString& path) {
     // If bow data is available, save it to the file, which becomes the current path.
     if(bow.has_value()) {
+        // Mirror upper → lower for every property flagged symmetric so the
+        // on-disk file is self-consistent even if the timer-driven sync in
+        // updateBowGeometry() hasn't fired yet (e.g. immediately after toggling
+        // a flag, before the 100 ms debounce elapses).
+        bow->syncSymmetric();
         save_model(bow.value(), path.toStdString(), this->converted);    // If the model data was converted from an older format, create a backup file when saving
         this->path = path;
         this->converted = false;
@@ -338,6 +343,10 @@ void MainModel::saveFile(const QString& path) {
 void MainModel::updateBowGeometry() {
     if(bow.has_value()) {
         try {
+            // Mirror upper → lower for every property flagged symmetric so the
+            // simulation core and all dependent views (plots, 3D limb, …) see
+            // a self-consistent model after every edit.
+            bow->syncSymmetric();
             geometry = compute_bow_info(*bow);
             error = std::nullopt;
         }

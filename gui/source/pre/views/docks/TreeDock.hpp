@@ -32,4 +32,8 @@ private:
     QMenu* createSegmentMenu();
 
     void updateActions();
+    // Hide / show the lower-limb top-level rows according to the current
+    // Symmetry flags. Called on construction, after model resets, and whenever
+    // the user toggles a symmetry checkbox.
+    void updateSymmetryVisibility();
 };

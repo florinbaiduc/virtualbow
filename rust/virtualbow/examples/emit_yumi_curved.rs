@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use virtualbow::input::{
     Arc, ArrowMass, BowModel, BowString, Damping, Draw, DrawLength, Handle, Height, Layer,
     LayerAlignment, LimbSection, Masses, Material, Profile, ProfileSegment, RigidHandle, Section,
-    Settings, Spline, Width,
+    Settings, Spline, Symmetry, Width,
 };
 
 /// Lengths along the limb (m).
@@ -174,6 +174,7 @@ fn build_yumi_curved() -> BowModel {
             damping_ratio_limbs: 0.05,
             damping_ratio_string: 0.05,
         },
+        symmetry: Symmetry::default(),
     }
 }
 

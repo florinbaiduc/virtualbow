@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use virtualbow::input::{
     ArrowMass, BowModel, BowString, Damping, Draw, DrawLength, Handle, Height, Layer,
     LayerAlignment, LimbSection, Line, Masses, Material, Profile, ProfileSegment, RigidHandle,
-    Section, Settings, Width,
+    Section, Settings, Symmetry, Width,
 };
 
 fn build_yumi() -> BowModel {
@@ -83,6 +83,7 @@ fn build_yumi() -> BowModel {
             damping_ratio_limbs: 0.05,
             damping_ratio_string: 0.05,
         },
+        symmetry: Symmetry::default(),
     }
 }
 
