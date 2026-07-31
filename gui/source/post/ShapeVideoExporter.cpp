@@ -219,17 +219,25 @@ ShapeVideoExporter::ShapeVideoExporter(QWidget* parent_widget, ShapePlot* size_r
 {
     // Pre-build the combined States now so the off-screen ShapePlot can hold
     // a stable const reference into it for the rest of the exporter's life.
-    if(data.statics.has_value() && data.dynamics.has_value()) {
-        combined_states = build_combined_states(data.statics->states, data.dynamics->states);
-        n_static = static_cast<int>(data.statics->states.time.size());
-        n_dynamic = static_cast<int>(data.dynamics->states.time.size());
+    // Works with or without a dynamic phase: when dynamics are absent the
+    // dynamic half is simply empty and only the pulling phase is exported.
+    if(data.statics.has_value()) {
+        const States empty_states;
+        const States& static_states = data.statics->states;
+        const States& dynamic_states = data.dynamics.has_value() ? data.dynamics->states : empty_states;
+        combined_states = build_combined_states(static_states, dynamic_states);
+        n_static = static_cast<int>(static_states.time.size());
+        n_dynamic = data.dynamics.has_value() ? static_cast<int>(dynamic_states.time.size()) : 0;
     }
 }
 
 ShapeVideoExporter::~ShapeVideoExporter() = default;
 
 bool ShapeVideoExporter::run() {
-    if(!data.dynamics.has_value() || n_dynamic < 2) {
+    // The dynamic (release) phase is optional. When it is missing or too
+    // short, only the static pulling phase is exported.
+    const bool has_dynamics = data.dynamics.has_value() && n_dynamic >= 2;
+    if(n_static < 2 && !has_dynamics) {
         QMessageBox::warning(parent_widget, tr("Save as video"),
                              tr("There are not enough simulation states to export a video."));
         return false;
@@ -243,7 +251,7 @@ bool ShapeVideoExporter::run() {
     QString filter = tr("MP4 video (*.mp4);;WebM video (*.webm);;Animated GIF (*.gif)");
     QString suggested_name = QStringLiteral("simulation.mp4");
     QString out_path = QFileDialog::getSaveFileName(
-        parent_widget, tr("Save dynamic simulation as video"),
+        parent_widget, tr("Save simulation as video"),
         QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(suggested_name),
         filter);
 
@@ -301,7 +309,9 @@ bool ShapeVideoExporter::run() {
     video_plot->resize(frame_size);
     {
         QCPRange xr, yr;
-        compute_unified_ranges(data.common, data.statics->states, data.dynamics->states, xr, yr);
+        const States empty_states;
+        const States& dyn_states = has_dynamics ? data.dynamics->states : empty_states;
+        compute_unified_ranges(data.common, data.statics->states, dyn_states, xr, yr);
         video_plot->setAxesLimits(1.05 * xr, 1.05 * yr);    // matches ShapePlot::updateAxes()
     }
 
@@ -330,11 +340,14 @@ bool ShapeVideoExporter::run() {
     // that's well under one frame. We stretch it to `dynamic_seconds` of
     // playback (slow motion) so the user can actually see the arrow fly,
     // never dropping below one frame per source state.
-    const auto& dyn_time = data.dynamics->states.time;
-    const double dynamic_duration = dyn_time.back() - dyn_time.front();
-    const int n_dynamic_realtime = std::max(2, static_cast<int>(std::lround(dynamic_duration * fps)));
-    const int n_dynamic_slowmo   = std::max(2, static_cast<int>(std::lround(dynamic_seconds * fps)));
-    const int n_dynamic_frames   = std::max({n_dynamic_realtime, n_dynamic_slowmo, n_dynamic});
+    int n_dynamic_frames = 0;
+    if(has_dynamics) {
+        const auto& dyn_time = data.dynamics->states.time;
+        const double dynamic_duration = dyn_time.back() - dyn_time.front();
+        const int n_dynamic_realtime = std::max(2, static_cast<int>(std::lround(dynamic_duration * fps)));
+        const int n_dynamic_slowmo   = std::max(2, static_cast<int>(std::lround(dynamic_seconds * fps)));
+        n_dynamic_frames = std::max({n_dynamic_realtime, n_dynamic_slowmo, n_dynamic});
+    }
 
     const int total_frames = n_prefix_frames + n_hold + n_dynamic_frames;
 
@@ -401,7 +414,7 @@ bool ShapeVideoExporter::run() {
     // (the first DYNAMIC capture of full draw), then hold there, then start
     // phase 3 from the same index. The boundary frames are then literally
     // the same data — no jump.
-    const int ramp_end_idx = (n_static > 0) ? dynamic_offset : 0;
+    const int ramp_end_idx = has_dynamics ? dynamic_offset : std::max(0, n_static - 1);
     for(int i = 0; i < n_prefix_frames; ++i) {
         int src_idx;
         if(n_prefix_frames <= 1 || n_static <= 1) {
@@ -429,25 +442,30 @@ bool ShapeVideoExporter::run() {
     // Phase 3: dynamic (release) frames, resampled at uniform time intervals.
     // For each output frame, find the nearest simulation state by timestamp.
     // The first frame maps to dynamic_offset (same as the hold frame above)
-    // so there is no transition pop.
-    video_plot->setTimerVisible(true);
-    const double dyn_t0 = dyn_time.front();
-    for(int i = 0; i < n_dynamic_frames; ++i) {
-        const double target_t = dyn_t0
-            + static_cast<double>(i) * dynamic_duration / (n_dynamic_frames - 1);
-        auto it = std::lower_bound(dyn_time.begin(), dyn_time.end(), target_t);
-        int dyn_idx;
-        if(it == dyn_time.end()) {
-            dyn_idx = n_dynamic - 1;
-        } else if(it == dyn_time.begin()) {
-            dyn_idx = 0;
-        } else {
-            auto prev = std::prev(it);
-            dyn_idx = (target_t - *prev <= *it - target_t)
-                ? static_cast<int>(prev - dyn_time.begin())
-                : static_cast<int>(it  - dyn_time.begin());
+    // so there is no transition pop. Skipped entirely for a static-only
+    // export, where no release motion exists.
+    if(has_dynamics) {
+        video_plot->setTimerVisible(true);
+        const auto& dyn_time = data.dynamics->states.time;
+        const double dynamic_duration = dyn_time.back() - dyn_time.front();
+        const double dyn_t0 = dyn_time.front();
+        for(int i = 0; i < n_dynamic_frames; ++i) {
+            const double target_t = dyn_t0
+                + static_cast<double>(i) * dynamic_duration / (n_dynamic_frames - 1);
+            auto it = std::lower_bound(dyn_time.begin(), dyn_time.end(), target_t);
+            int dyn_idx;
+            if(it == dyn_time.end()) {
+                dyn_idx = n_dynamic - 1;
+            } else if(it == dyn_time.begin()) {
+                dyn_idx = 0;
+            } else {
+                auto prev = std::prev(it);
+                dyn_idx = (target_t - *prev <= *it - target_t)
+                    ? static_cast<int>(prev - dyn_time.begin())
+                    : static_cast<int>(it  - dyn_time.begin());
+            }
+            if(!write_frame(dynamic_offset + dyn_idx, target_t - dyn_t0)) return false;
         }
-        if(!write_frame(dynamic_offset + dyn_idx, target_t - dyn_t0)) return false;
     }
     progress.setValue(total_frames);
 

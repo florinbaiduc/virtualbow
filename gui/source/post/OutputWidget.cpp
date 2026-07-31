@@ -180,10 +180,10 @@ StaticOutputWidget::StaticOutputWidget(const BowResult& data)
     shape_toolbar->setContentsMargins(4, 4, 4, 0);
     auto save_video_button = new QPushButton(tr("Save as video..."));
     const bool has_dynamics = data.dynamics.has_value();
-    save_video_button->setEnabled(has_dynamics);
+    save_video_button->setEnabled(true);
     save_video_button->setToolTip(has_dynamics
         ? tr("Render the pulling, full-draw hold, and release phases of the simulation to a video file (requires ffmpeg).")
-        : tr("A dynamic simulation is required to export the video. Re-run the model with dynamics enabled."));
+        : tr("Render the pulling phase of the static simulation to a video file (requires ffmpeg). Enable dynamics to also capture the full-draw hold and release."));
     shape_toolbar->addWidget(save_video_button);
     shape_toolbar->addStretch(1);
     shape_layout->addLayout(shape_toolbar);
@@ -211,22 +211,20 @@ StaticOutputWidget::StaticOutputWidget(const BowResult& data)
     QObject::connect(slider, &Slider::indexChanged, plot_energy, &EnergyPlot::setStateIndex);
     emit slider->indexChanged(0);
 
-    // Wire the "Save as video..." button. The exporter walks both static
-    // and dynamic phases through its own off-screen plot, so we don't need
-    // to touch any visible plot here. We still preserve the slider's
-    // current index across the call.
-    if(has_dynamics) {
-        QObject::connect(save_video_button, &QPushButton::clicked, this,
-            [this, plot_shapes, slider, &data]() {
-            const int saved_idx = slider->property("__current_index").toInt();
-            ShapeVideoExporter exporter(this, plot_shapes, data, 2.0, 3.0);
-            exporter.run();
-            emit slider->indexChanged(saved_idx);
-        });
-        QObject::connect(slider, &Slider::indexChanged, save_video_button, [slider](int i) {
-            slider->setProperty("__current_index", i);
-        });
-    }
+    // Wire the "Save as video..." button. The exporter walks the static
+    // (and, when present, dynamic) phases through its own off-screen plot,
+    // so we don't need to touch any visible plot here. We still preserve
+    // the slider's current index across the call.
+    QObject::connect(save_video_button, &QPushButton::clicked, this,
+        [this, plot_shapes, slider, &data]() {
+        const int saved_idx = slider->property("__current_index").toInt();
+        ShapeVideoExporter exporter(this, plot_shapes, data, 2.0, 3.0);
+        exporter.run();
+        emit slider->indexChanged(saved_idx);
+    });
+    QObject::connect(slider, &Slider::indexChanged, save_video_button, [slider](int i) {
+        slider->setProperty("__current_index", i);
+    });
 
     auto vbox = new QVBoxLayout();
     this->setLayout(vbox);
