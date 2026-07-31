@@ -339,8 +339,8 @@
   },
   "string": {
     "strand_stiffness": 3500.0,
-    "strand_density": 0.0005,
-    "n_strands": 56
+    "strand_density": 0.0002,
+    "n_strands": 16
   },
   "masses": {
     "arrow": {
