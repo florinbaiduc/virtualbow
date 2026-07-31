@@ -14,8 +14,8 @@ redistributable installer, see [build-portable.ps1](build-portable.ps1).
 2. **Rust** (stable, from https://rustup.rs/) on `PATH`.
 
 That's it. The script installs every other prerequisite (mingw64 GCC,
-CMake, Ninja, Qt6, nlohmann-json, Catch2, the `x86_64-pc-windows-gnu` Rust
-target) automatically.
+CMake, Ninja, Qt6 (base, tools, svg), nlohmann-json, Catch2, the
+`x86_64-pc-windows-gnu` Rust target) automatically.
 
 You do **not** need Visual Studio, Qt Creator, or any other MinGW
 distribution. In fact, having a stray `C:\MinGW\bin` ahead of MSYS2 on
@@ -56,6 +56,12 @@ Replace `<msys2>` with your MSYS2 install root:
 ```powershell
 $msys2 = "C:\msys64"   # or wherever you installed it
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$msys2\mingw64\bin;$msys2\usr\bin;" + $env:PATH
+
+# Qt6 SVG (qt6-svg) is required at runtime for the toolbar / slider icons to
+# render — without it QIcon cannot rasterize the .svg resources and the icons
+# appear blank.
+pacman -S --needed mingw-w64-x86_64-qt6-base mingw-w64-x86_64-qt6-tools `
+                   mingw-w64-x86_64-qt6-svg
 
 mkdir build -ErrorAction SilentlyContinue
 cd build

@@ -10,7 +10,42 @@
 #include <QSlider>
 #include <QMenu>
 #include <QTimer>
+#include <QIcon>
+#include <QPixmap>
+#include <QPainter>
+#include <QColor>
+#include <QPalette>
 #include <cmath>
+
+namespace {
+
+// Qt's SVG icon engine does not resolve `currentColor` / CSS-class fills, so
+// the media icons carry a fixed dark fill. On a dark UI theme that fill is
+// nearly invisible against the dark buttons. Render the icon and recolor its
+// silhouette to `color` (the current palette's button-text color) so the
+// buttons stay legible in both light and dark themes.
+QIcon recolored_icon(const QString& path, const QColor& color) {
+    QIcon base(path);
+    QIcon result;
+    const int sizes[] = {16, 20, 24, 28, 32, 48, 64};
+    const qreal ratios[] = {1.0, 2.0};
+    for(int size : sizes) {
+        for(qreal ratio : ratios) {
+            QPixmap pm = base.pixmap(QSize(size, size), ratio);
+            if(pm.isNull()) {
+                continue;
+            }
+            QPainter painter(&pm);
+            painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+            painter.fillRect(pm.rect(), color);
+            painter.end();
+            result.addPixmap(pm);
+        }
+    }
+    return result;
+}
+
+} // namespace
 
 Slider::Slider(const std::vector<double>& values, const QString& text, const Quantity& quantity)
     : edit(new QLineEdit()),
@@ -23,13 +58,18 @@ Slider::Slider(const std::vector<double>& values, const QString& text, const Qua
 {
     const int height = 30; // Magic number
 
+    // Recolor the media-button icons to the palette's text color so they
+    // remain visible regardless of the active (light/dark) theme. WindowText
+    // is the same role the visible slider label uses.
+    const QColor icon_color = this->palette().color(QPalette::WindowText);
+
     edit = new QLineEdit();
     edit->setFixedHeight(height);
     edit->setValidator(new QDoubleValidator());
 
     auto button_jump_to = new QToolButton();
     button_jump_to->setToolTip(Tooltips::SliderJumpTo);
-    button_jump_to->setIcon(QIcon(":/icons/media-jump-to.svg"));
+    button_jump_to->setIcon(recolored_icon(":/icons/media-jump-to.svg", icon_color));
     button_jump_to->setFixedSize(height, height);
     button_jump_to->setStyleSheet("QToolButton::menu-indicator { image: none; }");
     button_jump_to->setMenu(menu);
@@ -37,17 +77,17 @@ Slider::Slider(const std::vector<double>& values, const QString& text, const Qua
 
     auto button_skip_backward = new QToolButton();
     button_skip_backward->setToolTip(Tooltips::SliderSkipToStart);
-    button_skip_backward->setIcon(QIcon(":/icons/media-skip-backward.svg"));
+    button_skip_backward->setIcon(recolored_icon(":/icons/media-skip-backward.svg", icon_color));
     button_skip_backward->setFixedSize(height, height);
 
     auto button_play_pause = new QToolButton();
     button_play_pause->setToolTip(Tooltips::SliderPlayPause);
-    button_play_pause->setIcon(QIcon(":/icons/media-playback-start.svg"));
+    button_play_pause->setIcon(recolored_icon(":/icons/media-playback-start.svg", icon_color));
     button_play_pause->setFixedSize(height, height);
 
     auto button_skip_forward = new QToolButton();
     button_skip_forward->setToolTip(Tooltips::SliderSkipToEnd);
-    button_skip_forward->setIcon(QIcon(":/icons/media-skip-forward.svg"));
+    button_skip_forward->setIcon(recolored_icon(":/icons/media-skip-forward.svg", icon_color));
     button_skip_forward->setFixedSize(height, height);
 
     auto hbox = new QHBoxLayout();
@@ -110,12 +150,12 @@ Slider::Slider(const std::vector<double>& values, const QString& text, const Qua
 
     auto start_playback = [=] {
         timer->start();
-        button_play_pause->setIcon(QIcon(":/icons/media-playback-pause.svg"));
+        button_play_pause->setIcon(recolored_icon(":/icons/media-playback-pause.svg", icon_color));
     };
 
     auto stop_playback = [=] {
         timer->stop();
-        button_play_pause->setIcon(QIcon(":/icons/media-playback-start.svg"));
+        button_play_pause->setIcon(recolored_icon(":/icons/media-playback-start.svg", icon_color));
     };
 
     QObject::connect(timer, &QTimer::timeout, [=] {

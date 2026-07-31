@@ -96,6 +96,7 @@ $RequiredPackages = @(
     "mingw-w64-x86_64-ninja",
     "mingw-w64-x86_64-qt6-base",
     "mingw-w64-x86_64-qt6-tools",
+    "mingw-w64-x86_64-qt6-svg",
     "mingw-w64-x86_64-nlohmann-json",
     "mingw-w64-x86_64-catch"
 )
